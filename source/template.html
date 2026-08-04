@@ -1,0 +1,485 @@
+<meta charset="utf-8">
+<title>Hogs of War 3: Modern Warfare</title>
+<style>
+  :root{
+    --trench:#1c1a12; --parch:#e4d6ac; --parch2:#d8c791; --ink:#2b2416;
+    --red:#8a2f1f; --olive:#57633a; --brass:#b98a2e; --brassdim:#8a6a28;
+  }
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--trench);
+    background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.02) 0 2px, transparent 2px 14px);
+    font-family:"Segoe UI",system-ui,sans-serif; color:var(--parch);
+    display:flex; flex-direction:column; align-items:center; min-height:100vh;
+  }
+  .stencil{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; text-transform:uppercase; letter-spacing:.06em; font-weight:normal;}
+  #masthead{margin:14px 0 8px; text-align:center; user-select:none;}
+  #masthead h1{margin:0; font-size:clamp(28px,4.5vw,46px); color:var(--parch); line-height:.95;}
+  #masthead h1 b{color:var(--red); -webkit-text-stroke:1px var(--parch2); font-weight:normal;}
+  #masthead .sub{font-size:clamp(12px,1.4vw,15px); letter-spacing:.45em; color:var(--brass); margin-top:2px;}
+  #stage{position:relative; width:min(96vw, 1240px); aspect-ratio:16/9; border:6px solid #3a3423; outline:2px solid var(--brassdim); box-shadow:0 0 0 1px #000,0 18px 60px rgba(0,0,0,.6); background:#000; overflow:hidden;}
+  .overlay{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:8;}
+  .hidden{display:none !important;}
+  .poster{
+    background:var(--parch); color:var(--ink); width:min(86%,660px); max-height:92%; overflow-y:auto;
+    border:3px solid var(--ink); outline:6px solid var(--parch); box-shadow:0 14px 50px rgba(0,0,0,.65);
+    padding:22px 30px 26px; text-align:center;
+  }
+  .poster h2{margin:0 0 2px; font-size:40px; color:var(--red); line-height:1;}
+  .poster .rule{height:3px; background:var(--ink); margin:10px auto 14px; width:70%; position:relative;}
+  .poster .rule::after{content:""; position:absolute; left:50%; top:-4px; width:11px; height:11px; background:var(--red); transform:translateX(-50%) rotate(45deg);}
+  .poster p.flavor{font-family:Georgia,serif; font-style:italic; font-size:15px; line-height:1.5; margin:8px auto 14px; max-width:52ch;}
+  .btnrow{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:14px;}
+  button{cursor:pointer; font-family:inherit;}
+  .stamp{
+    font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; text-transform:uppercase; letter-spacing:.08em;
+    font-size:20px; padding:10px 22px 8px; background:var(--red); color:var(--parch);
+    border:2px solid var(--ink); box-shadow:3px 3px 0 var(--ink); transition:transform .06s;
+  }
+  .stamp:hover{transform:translate(-1px,-1px); box-shadow:4px 4px 0 var(--ink);}
+  .stamp:active{transform:translate(2px,2px); box-shadow:1px 1px 0 var(--ink);}
+  .stamp.alt{background:var(--olive);}
+  .stamp.ghost{background:transparent; color:var(--ink);}
+  .stamp:disabled{opacity:.45; cursor:default;}
+  .nations{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:6px 0 4px;}
+  .nation{border:2px solid var(--ink); background:var(--parch2); padding:10px 6px 8px; cursor:pointer;}
+  .nation:hover{background:#efe3bd;}
+  .nation.sel{background:var(--ink); color:var(--parch);}
+  .nation .flag{height:10px; margin:0 18px 8px;}
+  .nation .tname{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:19px; letter-spacing:.05em; text-transform:uppercase; line-height:1;}
+  .nation .cname{font-size:11px; opacity:.75; margin-top:3px;}
+  .nation .perk{font-size:10.5px; line-height:1.35; margin-top:6px; opacity:.8;}
+  .squadlist{display:grid; grid-template-columns:1fr 1fr; gap:6px 18px; text-align:left; margin:10px auto 4px; max-width:430px; font-size:14px;}
+  .squadlist .cls{color:var(--red); font-size:11px; text-transform:uppercase; letter-spacing:.08em;}
+  .small{font-size:12px; opacity:.7;}
+  #hud{position:absolute; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:flex-start; padding:8px 10px; z-index:5; pointer-events:none;}
+  .teambox, #mid, .poster{
+    border:2px solid var(--brass) !important; box-shadow:0 8px 32px rgba(0,0,0,.75), inset 0 0 15px rgba(185,138,46,.15) !important;
+    border-radius:4px; backdrop-filter:blur(4px);
+  }
+  /* background was dropped in the UI restyle — without it the team names sat on bare sky */
+  .teambox{width:240px; padding:6px 9px 7px; background:rgba(20,17,10,.82);}
+  .teambox .tn{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:16px; letter-spacing:.06em; text-transform:uppercase; display:flex; justify-content:space-between;}
+  .hpbar{height:9px !important; background:#14100a !important; margin-top:5px; border:1px solid #000 !important; box-shadow:inset 0 1px 3px rgba(0,0,0,.8);}
+  .hpbar i{display:block; height:100%; background:#7fa24a; transition:width .4s; box-shadow:0 0 8px rgba(127,162,74,.6);}
+  .teambox.enemy .hpbar i{background:#b0532f; box-shadow:0 0 8px rgba(176,83,47,.6);}
+  /* the two edge columns that hold up to three strength boxes each */
+  .tbcol{display:flex; flex-direction:column; gap:5px;}
+  #tbR{align-items:flex-end;}
+  .teambox.slim{width:186px; padding:4px 8px 5px;}
+  .teambox.slim .tn{font-size:13.5px;}
+  .teambox.turn{box-shadow:0 8px 32px rgba(0,0,0,.75), 0 0 0 2px rgba(255,232,154,.75) !important;}
+  /* per-player setup rows */
+  #roster{margin:7px 0 2px; display:flex; flex-direction:column; gap:4px;}
+  .prow{display:flex; align-items:center; gap:7px; border-left:4px solid var(--brass);
+        background:rgba(20,17,10,.16); padding:3px 6px;}
+  /* battle report / service record tables */
+  .statwrap{margin-top:10px; text-align:left;}
+  .stathead{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:15px;
+            letter-spacing:.12em; text-transform:uppercase; opacity:.8; margin-bottom:4px;}
+  table.stats{width:100%; border-collapse:collapse; font-size:12px; color:var(--ink);}
+  table.stats th{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-weight:400;
+                 letter-spacing:.05em; text-transform:uppercase; font-size:12px;
+                 text-align:right; padding:2px 5px; border-bottom:1px solid rgba(0,0,0,.35);}
+  table.stats th:first-child{text-align:left;}
+  table.stats td{padding:2px 5px; text-align:right; border-bottom:1px solid rgba(0,0,0,.10);
+                 font-variant-numeric:tabular-nums;}
+  table.stats td:first-child{text-align:left; opacity:.78; white-space:nowrap;}
+  table.stats tr:last-child td{border-bottom:none;}
+  #endStats.wide table.stats{font-size:11px;}
+  #endStats.wide table.stats th, #endStats.wide table.stats td{padding:2px 3px;}
+  .prow .pno{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:14px;
+             letter-spacing:.06em; width:22px; opacity:.85;}
+  .pbtn{flex:0 0 auto; font:inherit; font-size:11.5px; padding:3px 8px; cursor:pointer;
+        border:1px solid var(--ink); background:var(--parch2); color:inherit;}
+  .pbtn.pnat{flex:1 1 auto; text-align:left; text-transform:uppercase; letter-spacing:.05em;}
+  .pbtn:disabled{opacity:.55; cursor:default;}
+  .pbtn.pwho{min-width:58px;}
+  .pbtn.pwho.human{background:var(--ink); color:var(--parch);}
+  /* per-team name and health colours on the floating hog tags */
+  .tag.foe .nm{color:var(--tn,#f2cdb4);}
+  .tag.foe .hb i{background:var(--tt,#b0532f);}
+  h1.stencil, h2.stencil{text-shadow:2px 2px 0 #000, -1px -1px 0 rgba(185,138,46,.4); letter-spacing:.08em;}
+  #mid{text-align:center; background:rgba(20,17,10,.82); border:1px solid var(--brassdim); padding:5px 16px 7px; min-width:150px;}
+  #timer{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:26px; line-height:1; font-variant-numeric:tabular-nums;}
+  #roundrow{font-size:9px; letter-spacing:.18em; color:var(--brass); margin-top:4px; text-transform:uppercase;}
+  #roundrow.danger{color:#ff6a4a; animation:pulseWarn 1s ease-in-out infinite;}
+  @keyframes pulseWarn{0%,100%{opacity:1}50%{opacity:.45}}
+  @media (prefers-reduced-motion:reduce){ #roundrow.danger{animation:none} }
+  #windrow{display:flex; align-items:center; gap:6px; justify-content:center; font-size:10px; letter-spacing:.2em; margin-top:3px;}
+  #windbar{width:90px; height:8px; border:1px solid var(--brassdim); position:relative; background:#241f13;}
+  #windbar::after{content:""; position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:var(--brassdim);}
+  #windfill{position:absolute; top:1px; bottom:1px; background:var(--brass);}
+  #tray{position:absolute; left:0; right:0; bottom:0; display:flex; justify-content:center; gap:6px; padding:8px; z-index:5;}
+  .wpn{background:rgba(20,17,10,.82); border:1px solid var(--brassdim); color:var(--parch); padding:6px 10px 5px; text-align:center; min-width:74px;}
+  .wpn .k{font-size:9px; color:var(--brass); letter-spacing:.15em;}
+  .wpn .n{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:15px; text-transform:uppercase; letter-spacing:.05em; line-height:1.05;}
+  .wpn .a{font-size:10px; opacity:.75; font-variant-numeric:tabular-nums;}
+  .wpn.sel{background:var(--red); border-color:var(--parch);}
+  .wpn:disabled{opacity:.35;}
+  /* ---- fullscreen: let the battlefield take the whole display ---- */
+  body.fs{justify-content:flex-start; background:#000;}
+  body.fs #masthead, body.fs #foot{display:none;}
+  body.fs #stage{
+    width:100vw; height:100vh; max-width:none; aspect-ratio:auto;
+    border:0; outline:0; box-shadow:none;
+  }
+  body.fs #toolbar{
+    position:fixed; top:0; right:0; width:auto; margin:0; z-index:30;
+    background:rgba(20,17,10,.55); padding:2px 6px; border-bottom-left-radius:4px;
+  }
+  body.fs #toolbar button{opacity:.65;}
+  body.fs #toolbar button:hover{opacity:1;}
+  /* toolbar sits OUTSIDE #stage — inside it, overflow:hidden swallowed the clicks */
+  #toolbar{width:min(96vw,1240px); display:flex; justify-content:flex-end; gap:4px; margin:0 0 6px;}
+  #toolbar button{background:none; border:none; color:var(--brass); font-family:inherit; font-size:11px;
+    letter-spacing:.2em; text-transform:uppercase; padding:6px 8px; cursor:pointer;}
+  #toolbar button:hover{color:var(--parch);}
+  #toolbar button:focus-visible{outline:2px solid var(--brass); outline-offset:2px;}
+  .diffbtn{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; text-transform:uppercase;
+    letter-spacing:.08em; font-size:15px; padding:5px 14px 4px; background:var(--parch2);
+    color:var(--ink); border:2px solid var(--ink); box-shadow:2px 2px 0 var(--ink);}
+  .diffbtn:hover{background:#efe3bd;}
+  .diffbtn.sel{background:var(--red); color:var(--parch);}
+  .sensbtn{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; text-transform:uppercase;
+    letter-spacing:.08em; font-size:15px; padding:5px 16px 4px; background:var(--parch2);
+    color:var(--ink); border:2px solid var(--ink); box-shadow:2px 2px 0 var(--ink);}
+  .sensbtn:hover{background:#efe3bd;}
+  .sensbtn.sel{background:var(--red); color:var(--parch);}
+  /* ---- touch controls ---- */
+  #touchpad{position:absolute; inset:0; z-index:6; pointer-events:none;}
+  .tcluster{position:absolute; bottom:96px; display:flex; flex-direction:column; align-items:center; gap:6px; pointer-events:none;}
+  .tleft{left:14px;} .tright{right:14px; align-items:flex-end;}
+  .trow{display:flex; gap:6px;}
+  .tbtn{pointer-events:auto; width:56px; height:52px; background:rgba(20,17,10,.66);
+    border:2px solid var(--brassdim); color:var(--parch); font-size:19px; line-height:1;
+    font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; letter-spacing:.05em;
+    border-radius:6px; touch-action:none; user-select:none;}
+  .tbtn.tsm{width:74px; height:44px; font-size:13px;}
+  .tbtn.tfire{width:96px; height:60px; font-size:20px; background:rgba(138,47,31,.85); border-color:var(--parch);}
+  .tbtn.act{background:var(--brass); color:var(--ink);}
+  body.touch #hint{display:none;}
+  /* clear the team/wind boxes, then shrink so all weapons fit one row */
+  body.touch #tray{bottom:auto; top:78px; flex-wrap:wrap; gap:3px; padding:4px;}
+  body.touch .wpn{min-width:0; padding:3px 6px 2px;}
+  body.touch .wpn .n{font-size:11px;}
+  body.touch .wpn .a{font-size:8px;}
+  body.touch .wpn .k{font-size:7px;}
+  /* ---- tutorial ---- */
+  #tutorial{position:absolute; left:50%; top:56%; transform:translateX(-50%); z-index:9; width:min(88%,470px);}
+  .tutbox{background:var(--parch); color:var(--ink); border:3px solid var(--ink);
+    outline:4px solid var(--parch); box-shadow:0 12px 40px rgba(0,0,0,.6); padding:14px 18px 16px;}
+  .tutstep{font-size:10px; letter-spacing:.22em; text-transform:uppercase; color:var(--red);}
+  .tutbox h3{margin:4px 0 6px; font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif;
+    font-size:24px; letter-spacing:.05em; text-transform:uppercase; line-height:1;}
+  .tutbox p{margin:0 0 12px; font-family:Georgia,serif; font-size:14px; line-height:1.45;}
+  .tutrow{display:flex; gap:10px;}
+  .tutbox .stamp{font-size:16px; padding:7px 16px 6px;}
+  /* ---- key rebinding ---- */
+  #bindlist{display:grid; gap:5px; margin:8px auto 4px; max-width:430px; text-align:left;}
+  .bindrow{display:flex; justify-content:space-between; align-items:center; gap:12px; font-size:13px;}
+  .bindkey{min-width:104px; font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif;
+    font-size:14px; letter-spacing:.06em; text-transform:uppercase; padding:4px 10px 3px;
+    background:var(--parch2); color:var(--ink); border:2px solid var(--ink); box-shadow:2px 2px 0 var(--ink);}
+  .bindkey:hover{background:#efe3bd;}
+  .bindkey.listening{background:var(--red); color:var(--parch); animation:pulseWarn .8s ease-in-out infinite;}
+  /* ---- armoury ---- */
+  .armHead{margin:12px 0 6px; font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif;
+    font-size:20px; letter-spacing:.06em; text-transform:uppercase; color:var(--red); text-align:left;}
+  .upList{display:grid; gap:4px;}
+  .upRow{display:grid; grid-template-columns:1fr 1.35fr auto; gap:10px; align-items:center;
+    text-align:left; background:var(--parch2); border:1px solid var(--ink); padding:5px 8px;}
+  .upName{font-size:13px; line-height:1.25;}
+  .upTier{font-size:11px; line-height:1.3;}
+  .pip{display:inline-block; width:11px; height:11px; margin-right:3px; background:transparent;
+    border:2px solid var(--ink); transform:rotate(45deg);}
+  .pip.on{background:var(--red);}
+  .buy{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:15px; letter-spacing:.05em;
+    padding:5px 12px 4px; background:var(--olive); color:var(--parch); border:2px solid var(--ink);
+    box-shadow:2px 2px 0 var(--ink); white-space:nowrap;}
+  .buy:hover{background:#67743f;}
+  .buy.off{opacity:.4; pointer-events:none;}
+  .buy.sf{background:#6d2230;}
+  .buy.sf:hover{background:#7d2a3a;}
+  .upRow.sfRow{background:#cfc09a; padding-top:3px; padding-bottom:3px; border-top:none;}
+  .upRow.elite{box-shadow:inset 3px 0 0 #6d2230;}
+  .sfTag{font-size:9px; letter-spacing:.12em; background:#6d2230; color:var(--parch); padding:1px 5px;}
+  #foot{margin:10px 0 18px; font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:#6e6448; text-align:center;}
+  kbd{background:#efe3bd; border:1px solid var(--ink); border-bottom-width:2px; padding:0 5px; font-size:12px; color:var(--ink); border-radius:2px;}
+  .ctl{display:grid; grid-template-columns:auto 1fr; gap:6px 14px; text-align:left; max-width:430px; margin:10px auto; font-size:14px; align-items:center;}
+  ::selection{background:var(--red); color:var(--parch);}
+  .gfocus{outline:3px solid var(--brass) !important; outline-offset:2px;}
+  /* 3D layers */
+  #tags{position:absolute; inset:0; z-index:4; pointer-events:none; overflow:hidden;}
+  .tag{position:absolute; transform:translate(-50%,-100%); text-align:center; display:none;}
+  .tag .nm{font-size:11px; color:#f2e8cc; text-shadow:0 1px 2px #000; letter-spacing:.04em;}
+  .tag.foe .nm{color:#f2cdb4;}
+  .tag .hb{width:34px; height:4px; background:#241f13; border:1px solid #00000088; margin:2px auto 0;}
+  .tag .hb i{display:block; height:100%; background:#7fa24a;}
+  .tag.foe .hb i{background:#b0532f;}
+  .tag.act .nm{color:#ffe89a;}
+  /* markers over usable hardware — tanks, boats, emplaced guns */
+  .atag{position:absolute; transform:translate(-50%,-100%); display:none; pointer-events:none;
+    font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:12px; letter-spacing:.09em;
+    padding:2px 7px 1px; border:1px solid rgba(0,0,0,.6); white-space:nowrap;
+    text-shadow:0 1px 2px rgba(0,0,0,.8); animation:atagBob 2.2s ease-in-out infinite;}
+  .a-tank{background:rgba(74,83,64,.88); color:#e6e2c8;}
+  .a-boat{background:rgba(57,100,122,.88); color:#e2eef2;}
+  .a-gun{background:rgba(138,47,31,.88); color:#f2e2c8;}
+  @keyframes atagBob{0%,100%{transform:translate(-50%,-100%)}50%{transform:translate(-50%,-118%)}}
+  @media (prefers-reduced-motion:reduce){ .atag{animation:none} }
+  .bub{position:absolute; transform:translate(-50%,-100%); background:#efe6c4; color:#2b2416; border:1.5px solid #2b2416;
+    font-family:Georgia,serif; font-size:12.5px; padding:4px 9px; border-radius:4px; white-space:nowrap; z-index:6;
+    box-shadow:2px 2px 0 rgba(0,0,0,.35);}
+  .ft{position:absolute; transform:translate(-50%,-50%); font:bold 14px Georgia,serif; text-shadow:0 1px 2px #000; z-index:6;}
+  #scope{position:absolute; inset:0; z-index:7; pointer-events:none;
+    background:radial-gradient(circle at center, transparent 40%, rgba(0,0,0,.85) 85%, rgba(0,0,0,.98) 100%);
+    box-shadow:inset 0 0 100px #000;}
+  #scope::before{content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:170px; height:170px; border:1px solid rgba(232,226,196,.72); border-radius:50%; box-shadow:0 0 0 9999px rgba(0,0,0,.18);}
+  #crosshair{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:4; pointer-events:none;
+    width:26px; height:26px; opacity:.9;}
+  #crosshair::before,#crosshair::after{content:""; position:absolute; background:var(--parch);}
+  #crosshair::before{left:50%; top:0; bottom:0; width:1.5px; transform:translateX(-50%);}
+  #crosshair::after{top:50%; left:0; right:0; height:1.5px; transform:translateY(-50%);}
+  #crosshair i{position:absolute; inset:6px; border:1.5px solid var(--parch); border-radius:50%;}
+  #crosshair.hot::before,#crosshair.hot::after{background:#ff4030;}
+  #crosshair.hot i{border-color:#ff4030; box-shadow:0 0 8px rgba(255,64,48,.7);}
+  #powerbar{position:absolute; left:50%; bottom:108px; transform:translateX(-50%); width:220px; height:12px;
+    background:#241f13; border:2px solid var(--ink); outline:1px solid var(--brassdim); z-index:5;}
+  #powerfill{display:block; height:100%; width:0; background:linear-gradient(90deg,var(--olive),var(--brass),var(--red));}
+  #anglechip{position:absolute; left:50%; bottom:130px; transform:translateX(-50%); z-index:5;
+    font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:17px; letter-spacing:.08em;
+    background:rgba(20,17,10,.72); border:1px solid var(--brassdim); padding:2px 10px; font-variant-numeric:tabular-nums;}
+  #hint{position:absolute; left:50%; bottom:64px; transform:translateX(-50%); z-index:5; white-space:nowrap;
+    font-size:11px; letter-spacing:.08em; color:#d8cba0; background:rgba(20,17,10,.6); padding:3px 12px; border:1px solid #3a3423;}
+  #hint b{color:var(--brass); font-weight:600;}
+  #crashnote{position:absolute; left:50%; top:14%; transform:translateX(-50%); z-index:12;
+    max-width:80%; background:rgba(138,47,31,.92); color:var(--parch); border:1px solid var(--parch);
+    font-size:12px; letter-spacing:.04em; padding:6px 12px; text-align:center;}
+  #banner{position:absolute; left:0; right:0; top:36%; z-index:6; text-align:center; pointer-events:none;
+    background:rgba(20,17,10,.78); border-top:2px solid var(--brass); border-bottom:2px solid var(--brass); padding:12px 0 14px;}
+  #bannerText{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:42px; letter-spacing:.06em; text-transform:uppercase; line-height:1;}
+  #bannerSub{font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:16px; color:var(--brass); letter-spacing:.2em; text-transform:uppercase; margin-top:4px;}
+</style>
+
+<div id="masthead">
+  <h1 class="stencil">HOGS <b>OF</b> WAR 3</h1>
+  <div class="sub stencil">MODERN&nbsp;WARFARE</div>
+</div>
+
+<div id="toolbar">
+  <button id="helpbtn">Manual [H]</button>
+  <button id="voicebtn">Voice: ON</button>
+  <button id="sfxbtn">Sound: ON</button>
+  <button id="gfxbtn" title="Cycle render quality">HIGH</button>
+  <button id="fsbtn">Fullscreen</button>
+</div>
+
+<div id="stage">
+  <div id="tags"></div>
+  <div id="scope" class="hidden"></div>
+  <div id="crosshair" class="hidden"><i></i></div>
+  <div id="powerbar" class="hidden"><i id="powerfill"></i></div>
+  <div id="anglechip" class="hidden">29°</div>
+  <div id="crashnote" class="hidden"></div>
+
+  <!-- on-screen controls for phones/tablets -->
+  <div id="touchpad" class="hidden">
+    <div class="tcluster tleft">
+      <button id="tUp"    class="tbtn">▲</button>
+      <div class="trow">
+        <button id="tLeft"  class="tbtn">◀</button>
+        <button id="tRight" class="tbtn">▶</button>
+      </div>
+      <button id="tDown"  class="tbtn">▼</button>
+    </div>
+    <div class="tcluster tright">
+      <div class="trow">
+        <button id="tWpnPrev" class="tbtn tsm">◀ WPN</button>
+        <button id="tWpnNext" class="tbtn tsm">WPN ▶</button>
+      </div>
+      <div class="trow">
+        <button id="tAimDown" class="tbtn tsm">AIM ▼</button>
+        <button id="tAimUp"   class="tbtn tsm">AIM ▲</button>
+      </div>
+      <div class="trow">
+        <button id="tJump" class="tbtn tsm">HOP</button>
+        <button id="tFire" class="tbtn tfire">FIRE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- first-run tutorial -->
+  <div id="tutorial" class="hidden">
+    <div class="tutbox">
+      <div class="tutstep" id="tutStep">Tip 1 of 6</div>
+      <h3 id="tutTitle">Your squad</h3>
+      <p id="tutBody"></p>
+      <div class="tutrow">
+        <button class="stamp" id="tutNext">Next</button>
+        <button class="stamp ghost" id="tutSkip">Skip</button>
+      </div>
+    </div>
+  </div>
+  <div id="hint" class="hidden"><b>SPACE</b> charge &amp; fire &nbsp;·&nbsp; <b>&uarr;&darr;</b> launch angle &nbsp;·&nbsp; <b>WASD</b> move &nbsp;·&nbsp; drag mouse to orbit</div>
+  <div id="banner" class="hidden"><div id="bannerText"></div><div id="bannerSub"></div></div>
+
+  <div id="hud" class="hidden">
+    <div id="tbL" class="tbcol"></div>
+    <div id="mid"><div id="timer">45</div>
+      <div id="windrow"><span>WIND</span><div id="windbar"><div id="windfill"></div></div></div>
+      <div id="roundrow">ROUND 1</div>
+    </div>
+    <div id="tbR" class="tbcol"></div>
+  </div>
+  <div id="tray" class="hidden"></div>
+
+  <div id="menu" class="overlay">
+    <div class="poster">
+      <h2 class="stencil">Boots On The Ground</h2>
+      <div class="rule"></div>
+      <p class="flavor">The swill wars never really ended &mdash; they just got quieter, and far better funded. Satellite intelligence has confirmed the last untapped reserve on the planet, and six nations already have troops on the ground. Drones overhead, armour on the roads, a carrier group offshore. Command has authorised everything short of the unthinkable. Welcome to the modern battlefield, operator.</p>
+      <div class="btnrow">
+        <button class="stamp" id="btnCampaign">New Campaign</button>
+        <button class="stamp alt hidden" id="btnContinue">Continue Campaign</button>
+        <button class="stamp alt" id="btnSkirmish">Quick Skirmish</button>
+        <button class="stamp ghost" id="btnHow">Field Manual</button>
+        <button class="stamp ghost hidden" id="btnRecord">Service Record</button>
+      </div>
+      <p class="small" style="margin-top:14px">A fan-made 3D modern-warfare prototype. Best played with keyboard &amp; mouse.</p>
+    </div>
+  </div>
+
+  <div id="natsel" class="overlay hidden">
+    <div class="poster">
+      <h2 class="stencil">Select Your Force</h2>
+      <div class="rule"></div>
+      <div class="nations" id="natgrid"></div>
+      <div id="diffRow" class="btnrow" style="margin-top:10px; gap:8px; align-items:center">
+        <span class="small" style="letter-spacing:.14em; text-transform:uppercase">Enemy skill</span>
+        <button class="diffbtn" data-diff="easy">Easy</button>
+        <button class="diffbtn" data-diff="normal">Normal</button>
+        <button class="diffbtn" data-diff="hard">Hard</button>
+      </div>
+      <div id="modeRow" style="margin-top:8px">
+        <div class="btnrow" style="gap:8px; align-items:center">
+          <span class="small" style="letter-spacing:.14em; text-transform:uppercase">Players</span>
+          <span id="pcount">
+            <button class="diffbtn" data-p="2">2</button><button class="diffbtn" data-p="3">3</button>
+            <button class="diffbtn" data-p="4">4</button><button class="diffbtn" data-p="5">5</button>
+            <button class="diffbtn" data-p="6">6</button>
+          </span>
+        </div>
+        <div id="roster"></div>
+        <div class="small" id="hotnote" style="margin-top:4px"></div>
+      </div>
+      <div class="squadlist" id="squadPreview"></div>
+      <div class="btnrow">
+        <button class="stamp" id="btnDeploy">Deploy Section</button>
+        <button class="stamp ghost" id="btnBack1">Back</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="passover" class="overlay hidden">
+    <div class="poster" style="text-align:center; max-width:460px">
+      <h2 class="stencil">Pass the Controls</h2>
+      <div class="rule"></div>
+      <div style="font-family:Haettenschweiler,'Arial Narrow',Impact,sans-serif; font-size:34px; letter-spacing:.05em; margin:14px 0 2px" id="passTeam">—</div>
+      <div class="small" id="passName">—</div>
+      <div class="small" style="margin-top:10px; opacity:.7">Everyone else look away.</div>
+      <div class="btnrow"><button class="stamp" id="btnPassGo">I'm Ready</button></div>
+    </div>
+  </div>
+
+  <div id="briefing" class="overlay hidden">
+    <div class="poster">
+      <h2 class="stencil" id="briefRegion">Bristle Beach</h2>
+      <div class="small stencil" id="briefSub" style="letter-spacing:.3em"></div>
+      <div class="rule"></div>
+      <p class="flavor" id="briefText"></p>
+      <div class="btnrow"><button class="stamp" id="btnAttack">ATTACK!</button>
+      <button class="stamp alt" id="btnArmBrief">Armoury</button>
+      <button class="stamp ghost" id="btnAbort">Retreat to HQ</button></div>
+    </div>
+  </div>
+
+  <div id="endscreen" class="overlay hidden">
+    <div class="poster">
+      <h2 class="stencil" id="endTitle">Victory</h2>
+      <div class="rule"></div>
+      <p class="flavor" id="endText"></p>
+      <div class="squadlist" id="endSquad"></div>
+      <div id="endStats"></div>
+      <div class="btnrow">
+        <button class="stamp" id="btnNext">Next Region</button>
+        <button class="stamp alt hidden" id="btnArmEnd">Armoury</button>
+        <button class="stamp ghost" id="btnHome">Back to HQ</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="record" class="overlay hidden">
+    <div class="poster" style="max-width:520px">
+      <h2 class="stencil">Service Record</h2>
+      <div class="rule"></div>
+      <div id="recordBody"></div>
+      <div class="btnrow"><button class="stamp ghost" id="btnCloseRecord">Close</button></div>
+    </div>
+  </div>
+
+  <div id="armoury" class="overlay hidden">
+    <div class="poster">
+      <h2 class="stencil">The Armoury</h2>
+      <div class="small stencil" style="letter-spacing:.3em">SWILL MARKS: <span id="armCoins">0</span> ⛃</div>
+      <div class="rule"></div>
+      <h3 class="armHead">Your Squad</h3>
+      <div id="armHogs" class="upList"></div>
+      <h3 class="armHead">Weapons</h3>
+      <div id="armWpns" class="upList"></div>
+      <div class="btnrow"><button class="stamp" id="btnArmClose">To the Front</button></div>
+    </div>
+  </div>
+
+  <div id="help" class="overlay hidden">
+    <div class="poster">
+      <h2 class="stencil">Field Manual</h2>
+      <div class="rule"></div>
+      <div class="ctl">
+        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>March your hog about (camera-relative)</span>
+        <span><kbd>Q</kbd></span><span>Hop (surprisingly athletic for a pig)</span>
+        <span>Mouse drag</span><span>Orbit camera &mdash; shells fly in the direction you face</span>
+        <span><kbd>&uarr;</kbd>/<kbd>&darr;</kbd></span><span>Raise or lower the launch angle &mdash; the dotted arc shows the flight path and the pulsing ring marks exactly where the shot will land (wind and bounces included)</span>
+        <span>Mouse wheel</span><span>Zoom</span>
+        <span>Hold <kbd>SPACE</kbd></span><span>Charge power &mdash; release to fire. Rifles &amp; airstrikes hit the crosshair directly</span>
+        <span><kbd>1</kbd>&ndash;<kbd>8</kbd></span><span>Select weapon (8 calls an airstrike on the crosshair)</span>
+        <span><kbd>M</kbd></span><span>Toggle the regimental voice-over</span>
+        <span>🎮 Controller</span><span>Full gamepad support &mdash; Steam&nbsp;Controller&nbsp;2 (via Steam Input), Xbox, PlayStation. <b>Left stick</b> move &middot; <b>right stick</b> aim camera &middot; <b>RT</b> charge &amp; fire &middot; <b>LB/RB</b> weapons &middot; <b>D-pad &uarr;&darr;</b> launch angle &middot; <b>A</b> hop &middot; sticks/D-pad + <b>A</b> drive the menus</span>
+      </div>
+      <p class="flavor">The campaign escalates from beach landings and hedgerow skirmishes to tanks, air support, amphibious landings, and a fortress-island finale. Four base classes promote through Grunt, Private, Corporal, Sergeant, Major, and Hero of the Sty, with each class branching into a distinct officer specialism at Sergeant rank.</p>
+      <div class="rule"></div>
+      <h3 class="stencil" style="margin:0 0 2px; font-size:22px; color:var(--red)">Look Sensitivity</h3>
+      <p class="small" style="margin:0">Scales automatically when you zoom, so scoped aiming stays steady.</p>
+      <div id="sensRow" class="btnrow" style="margin:8px 0 4px; gap:8px">
+        <button class="sensbtn" data-sens="low">Low</button>
+        <button class="sensbtn" data-sens="normal">Normal</button>
+        <button class="sensbtn" data-sens="high">High</button>
+      </div>
+      <div class="rule"></div>
+      <h3 class="stencil" style="margin:0 0 2px; font-size:22px; color:var(--red)">Rebind Keys</h3>
+      <p class="small" style="margin:0">Click a key, then press the one you want.</p>
+      <div id="bindlist"></div>
+      <div class="btnrow">
+        <button class="stamp" id="btnCloseHelp">Dismissed</button>
+        <button class="stamp alt" id="btnTutorial">Replay Tutorial</button>
+        <button class="stamp ghost" id="btnResetKeys">Reset Keys</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="foot">He who controls the swill controls the world &mdash; Combined Joint Task Force, present day</div>
+
+<script>__BUNDLE__</script>
