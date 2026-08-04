@@ -75,10 +75,10 @@ const DIFFS={
   hard:  {label:'Hard',   errMul:0.35, elStep:0.06, sniperChance:0.65},
 };
 let difficulty='normal';
-try{ difficulty=DIFFS[localStorage.getItem('hogs2diff')]?localStorage.getItem('hogs2diff'):'normal'; }catch(e){}
+try{ difficulty=DIFFS[localStorage.getItem('hogs3diff')]?localStorage.getItem('hogs3diff'):'normal'; }catch(e){}
 function setDifficulty(d){
   difficulty=DIFFS[d]?d:'normal';
-  try{ localStorage.setItem('hogs2diff',difficulty); }catch(e){}
+  try{ localStorage.setItem('hogs3diff',difficulty); }catch(e){}
   document.querySelectorAll('#diffRow .diffbtn').forEach(b=>
     b.classList.toggle('sel',b.dataset.diff===difficulty));
 }
@@ -173,7 +173,7 @@ function speak(t){ try{
   speechSynthesis.speak(u);
 }catch(e){} }
 let AC=null, masterGain=null, sfxOn=true;
-try{ sfxOn=localStorage.getItem('hogs2sfx')!=='0'; }catch(e){}
+try{ sfxOn=localStorage.getItem('hogs3sfx')!=='0'; }catch(e){}
 function audioCtx(){
   if(!AC){
     AC=new (window.AudioContext||window.webkitAudioContext)();
@@ -186,7 +186,7 @@ function audioCtx(){
 function toggleSfx(){
   sfxOn=!sfxOn;
   if(masterGain) masterGain.gain.value=sfxOn?0.85:0;
-  try{ localStorage.setItem('hogs2sfx',sfxOn?'1':'0'); }catch(e){}
+  try{ localStorage.setItem('hogs3sfx',sfxOn?'1':'0'); }catch(e){}
   const b=$('sfxbtn'); if(b) b.textContent='Sound: '+(sfxOn?'ON':'OFF');
 }
 function sfx(kind){ try{
@@ -416,7 +416,7 @@ function defaultGfx(){
 }
 let gfx=defaultGfx();
 try{
-  const saved=localStorage.getItem('hogs2gfx');
+  const saved=localStorage.getItem('hogs3gfx');
   if(saved==='low') gfx='medium';                 // migrate the old tier names
   else if(GFX_CFG[saved]) gfx=saved;
 }catch(e){}
@@ -429,7 +429,7 @@ function applyGfx(){
   keyLight.shadow.mapSize.set(c.shadow,c.shadow);
   if(keyLight.shadow.map){ keyLight.shadow.map.dispose(); keyLight.shadow.map=null; }
   scene.traverse(o=>{ if(o.isMesh&&o.material) o.material.needsUpdate=true; });
-  try{ localStorage.setItem('hogs2gfx',gfx); }catch(e){}
+  try{ localStorage.setItem('hogs3gfx',gfx); }catch(e){}
   resize();
 }
 function cycleGfx(){
@@ -1760,8 +1760,8 @@ function makeGrave(){
 let screenState='menu';
 let campaign=null, pendingMode='campaign', B=null;
 let shake=0;
-function loadSave(){ try{ const s=localStorage.getItem('hogs2'); return s?JSON.parse(s):null; }catch(e){ return null; } }
-function save(){ try{ if(campaign) localStorage.setItem('hogs2',JSON.stringify(campaign)); }catch(e){} }
+function loadSave(){ try{ const s=localStorage.getItem('hogs3'); return s?JSON.parse(s):null; }catch(e){ return null; } }
+function save(){ try{ if(campaign) localStorage.setItem('hogs3',JSON.stringify(campaign)); }catch(e){} }
 /* Bank the player's side of a finished campaign battle into the career record. */
 function bankCareer(won){
   if(!campaign||!B||!B.stats) return;
@@ -1771,7 +1771,7 @@ function bankCareer(won){
   campaign.career.rounds=(campaign.career.rounds||0)+(B.round||0);
   save();
 }
-function clearSave(){ try{ localStorage.removeItem('hogs2'); }catch(e){} }
+function clearSave(){ try{ localStorage.removeItem('hogs3'); }catch(e){} }
 function makeSquad(natIdx){
   const pool=[...NATIONS[natIdx].names];
   return CLASSES.map(c=>{ const i=Math.floor(rnd()*pool.length);
@@ -3248,11 +3248,11 @@ const BASE_FOV=55;
 const SENS_LEVELS=['low','normal','high'];
 const SENS_MUL={low:0.6, normal:1, high:1.6};
 let lookSens='normal';
-try{ const s=localStorage.getItem('hogs2sens'); if(SENS_MUL[s]) lookSens=s; }catch(e){}
+try{ const s=localStorage.getItem('hogs3sens'); if(SENS_MUL[s]) lookSens=s; }catch(e){}
 function lookScale(){ return (camera.fov/BASE_FOV)*SENS_MUL[lookSens]; }
 function setSens(s){
   lookSens=SENS_MUL[s]?s:'normal';
-  try{ localStorage.setItem('hogs2sens',lookSens); }catch(e){}
+  try{ localStorage.setItem('hogs3sens',lookSens); }catch(e){}
   document.querySelectorAll('#sensRow .sensbtn').forEach(b=>
     b.classList.toggle('sel',b.dataset.sens===lookSens));
 }
@@ -3283,8 +3283,8 @@ const BIND_LABELS={forward:'Move forward',back:'Move back',left:'Move left',righ
   angleUp:'Raise launch angle',angleDown:'Lower launch angle',
   manual:'Field manual',voice:'Toggle voice-over',fullscreen:'Fullscreen'};
 let binds={...DEFAULT_BINDS};
-try{ const s=JSON.parse(localStorage.getItem('hogs2keys')||'null'); if(s) binds={...DEFAULT_BINDS,...s}; }catch(e){}
-function saveBinds(){ try{ localStorage.setItem('hogs2keys',JSON.stringify(binds)); }catch(e){} }
+try{ const s=JSON.parse(localStorage.getItem('hogs3keys')||'null'); if(s) binds={...DEFAULT_BINDS,...s}; }catch(e){}
+function saveBinds(){ try{ localStorage.setItem('hogs3keys',JSON.stringify(binds)); }catch(e){} }
 function keyLabel(k){ return k===' '?'SPACE':k.startsWith('arrow')?k.slice(5).toUpperCase()+' ARROW':k.toUpperCase(); }
 function down(action){ return !!keys[binds[action]]; }
 let listeningFor=null;   // set while the player is rebinding a key
@@ -3341,7 +3341,7 @@ function looksLikeTouchDevice(){
   return matchMedia('(pointer:coarse)').matches && matchMedia('(hover:none)').matches;
 }
 const TOUCH_MODES=['auto','on','off'];
-let touchPref=(()=>{ try{ const v=localStorage.getItem('hogs2touch');
+let touchPref=(()=>{ try{ const v=localStorage.getItem('hogs3touch');
   return TOUCH_MODES.includes(v)?v:'auto'; }catch(e){ return 'auto'; } })();
 let isTouch=touchPref==='on'||(touchPref==='auto'&&looksLikeTouchDevice());
 let lastTouchAt=0;
@@ -3351,7 +3351,7 @@ function touchLabel(){
 }
 function cycleTouch(){
   touchPref=TOUCH_MODES[(TOUCH_MODES.indexOf(touchPref)+1)%TOUCH_MODES.length];
-  try{ localStorage.setItem('hogs2touch',touchPref); }catch(e){}
+  try{ localStorage.setItem('hogs3touch',touchPref); }catch(e){}
   applyTouchPref();
 }
 function applyTouchPref(){
@@ -3441,8 +3441,8 @@ const TUTORIAL=[
   {t:'Mind the swill',  b:'After round '+SUDDEN_DEATH_ROUND+' the swill starts rising and drowns the low ground. Do not dawdle.'},
 ];
 let tutStep=0;
-function tutorialSeen(){ try{ return localStorage.getItem('hogs2tut')==='1'; }catch(e){ return false; } }
-function markTutorialSeen(){ try{ localStorage.setItem('hogs2tut','1'); }catch(e){} }
+function tutorialSeen(){ try{ return localStorage.getItem('hogs3tut')==='1'; }catch(e){ return false; } }
+function markTutorialSeen(){ try{ localStorage.setItem('hogs3tut','1'); }catch(e){} }
 function showTutorial(step){
   tutStep=step;
   if(step>=TUTORIAL.length){ closeTutorial(); return; }
