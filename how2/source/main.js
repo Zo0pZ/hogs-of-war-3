@@ -1867,6 +1867,7 @@ function startBattle(cfg){
       team:Math.floor(Math.random()*cfg.nats.length), idx:cfg.nats.map(()=>0),
       charging:false, power:0, sel:1, shotHurt:false, over:false,
       turns:0, round:1, sudden:false, earned:{kills:0,dmg:0}, fires:[], napalm:false,
+      lastShot:cfg.nats.map(()=>null), fired:false, retreatT:0,
       stats:cfg.nats.map(()=>blankStats()), shotTeam:null, shotHitFoe:false,
       ammo:cfg.squads.map((sq,t)=>teamAmmo(sq,t,cfg.campaign)), aiPlan:null };
   waterLevel=WATER_Y;
@@ -2011,8 +2012,13 @@ function beginTurn(first){
     }
   }
   newWind();
-  B.state='start'; B.st=0; B.timer=45; B.shotHurt=false; B.aiPlan=null; B.charging=false; B.power=0; B.sel=1; B.aimPitch=0.5;
-  B.aiMove=undefined; B.aiMoveEnd=undefined; B.aiBoard=null; B.aiAimAt=null;   // recomputed each AI turn
+  B.state='start'; B.st=0; B.timer=45; B.shotHurt=false; B.aiPlan=null; B.charging=false; B.power=0; B.sel=1;
+  B.fired=false; B.retreatT=0;
+  // pick up where this squad left off, so a near miss is an adjustment
+  const prev=B.lastShot&&B.lastShot[B.team];
+  B.aimPitch=prev?prev.pitch:0.5;
+  if(ghostPts) ghostPts.visible=!!(prev&&ghostShown&&!isAI(B.team));
+  B.aiMove=undefined; B.aiMoveEnd=undefined; B.aiBoard=null; B.aiAimAt=null; B.aiRetreat=undefined;   // recomputed each AI turn
   B.strikeHeading=null; B.strikeTarget=null; B.bombCursor=null;   // re-aimed each turn
   // you have to re-man an emplacement each turn; vehicles you stay in
   for(const g of B.hogs) if(g.emplacement) g.emplacement=null;
@@ -2616,14 +2622,19 @@ function fire(h,w,dir,speed){
     if(hit){ let d=w.dmg; if(h.cls==='Spy') d=Math.round(d*1.3);
       hit.grounded=false; hit.vel.addScaledVector(dir,6); hit.vel.y=Math.max(hit.vel.y,4);
       damageHog(hit,d,h,'ray'); }
-    endAction(); return;
+    beginRetreat(); return;
   }
   sfx('launch'); muzzleFlash(h);
   spawnProj(w.id,muzzle(h).addScaledVector(dir,1.4),dir.clone().multiplyScalar(speed),{
     owner:h, windAcc:w.wind?B.wind:0, bounce:w.kind==='bounce'||w.kind==='minetoss',
     fuse:w.kind==='bounce'?w.fuse:null, r:w.r, dmg:w.dmg, cluster:!!w.cluster});
+  // bank the aim so next turn can start from it rather than from a default
+  if(!isAI(h.team)&&B.lastShot){
+    B.lastShot[h.team]={pitch:B.aimPitch, power:B.power, sp:speed};
+    rememberArc();
+  }
   cam.follow=B.projs[B.projs.length-1].mesh;
-  endAction();
+  beginRetreat();
 }
 function rayGround(from,dir){
   const p=from.clone(), step=dir.clone().multiplyScalar(1.2);
@@ -2670,8 +2681,22 @@ function tracer(a,b){
   const l=new THREE.Line(g,new THREE.LineBasicMaterial({color:0xf0dc96,transparent:true,opacity:0.9}));
   scene.add(l); B.tracers.push({mesh:l,life:0.25});
 }
-function endAction(){ B.state='resolve'; B.st=0; B.charging=false; B.power=0;
+const RETREAT_TIME=4;
+/* Firing used to end the turn on the spot, which made every exchange a
+   stand-and-trade. Now the shot goes off and you have a few seconds to get out
+   of the open — the turn is still yours, you just cannot shoot again. */
+function beginRetreat(){
+  if(!B||B.fired){ endAction(); return; }
+  B.fired=true; B.retreatT=RETREAT_TIME;
+  B.charging=false; B.power=0;
+  trajPts.visible=false; impactRing.visible=false; aimDot.visible=false;
+  ghostPts.visible=false;
+  $('crosshair').classList.remove('hot');
+  buildTray();
+}
+function endAction(){ B.state='resolve'; B.st=0; B.charging=false; B.power=0; B.fired=false; B.retreatT=0;
   trajPts.visible=false; impactRing.visible=false; aimDot.visible=false; strikeMarker.visible=false;
+  ghostPts.visible=false;
   $('crosshair').classList.remove('hot'); buildTray(); }
 
 /* ================= AI ================= */
@@ -3046,7 +3071,8 @@ function updateHUD(){
     el.querySelector('.cnt').textContent=list.filter(h=>!h.dead).length+'/'+list.length;
     el.classList.toggle('turn',B.team===t&&!B.over);
   }
-  $('timer').textContent=Math.max(0,Math.ceil(B.timer));
+  $('timer').textContent=Math.max(0,Math.ceil(B.fired?B.retreatT:B.timer));
+  const tEl=$('timer'); if(tEl) tEl.classList.toggle('retreat',!!B.fired);
   const rr=$('roundrow');
   if(rr){
     if(B.sudden){ rr.textContent='SUDDEN DEATH'; rr.classList.add('danger'); }
@@ -3297,18 +3323,19 @@ function startCharge(){
   if(!B||B.state!=='action'||isAI(B.team)) return;
   const w=currentWeapon(), h=activeHog();
   if(!h) return;
+  if(B.fired) return;                       // shot already taken — you may run, not shoot
   if(w.kind==='heal'){ fire(h,w,aimDir(),0); return; }
   // everything that is aimed down the crosshair rather than lobbed
   if(['ray','strike','burst','flame','arty'].includes(w.kind)){ fire(h,w,crosshairDir(h),0); return; }
   B.charging=true;
 }
 function releaseCharge(){
-  if(!B||!B.charging||B.state!=='action') return;
+  if(!B||!B.charging||B.state!=='action'||B.fired) return;
   const h=activeHog(); if(!h) return;
   fire(h,currentWeapon(),aimDirBallistic(),12+B.power*3.5);
 }
 function selectWeapon(n){
-  if(!B||B.state!=='action'||isAI(B.team)) return;
+  if(!B||B.state!=='action'||isAI(B.team)||B.fired) return;
   const act=activeHog();
   const w=WEAPONS.filter(x=>canUse(x,act)).find(x=>x.key===String(n));
   if(!w) return;
@@ -3419,6 +3446,24 @@ const trajGeo=new THREE.BufferGeometry();
 trajGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(96*3),3));
 const trajPts=new THREE.Points(trajGeo,new THREE.PointsMaterial({color:0xffd76a,size:0.85,transparent:true,opacity:1,sizeAttenuation:true}));
 trajPts.visible=false; scene.add(trajPts);
+/* The shot you actually took last turn, faint and behind the live preview.
+   Aiming artillery is a conversation with your previous attempt; without this
+   every shot starts from nothing and you never build any feel for the range. */
+const ghostGeo=new THREE.BufferGeometry();
+ghostGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(96*3),3));
+const ghostPts=new THREE.Points(ghostGeo,new THREE.PointsMaterial({
+  color:0x8fd0e8,size:0.55,transparent:true,opacity:0.5,sizeAttenuation:true,depthWrite:false}));
+ghostPts.visible=false; scene.add(ghostPts);
+/* Copy whatever the live preview is showing — at the moment of firing that is
+   exactly the path the shell is about to take. */
+function rememberArc(){
+  const src=trajGeo.attributes.position, dst=ghostGeo.attributes.position;
+  dst.array.set(src.array);
+  ghostGeo.setDrawRange(0,trajGeo.drawRange.count);
+  dst.needsUpdate=true;
+  ghostShown=true;
+}
+let ghostShown=false;
 // impact ring: shows exactly where the shot will land (incl. wind, bounces, fuse)
 const impactRing=new THREE.Group();
 const ringM=new THREE.Mesh(new THREE.RingGeometry(1.15,1.7,28),
@@ -3695,6 +3740,10 @@ function update(){
       if(B.paused) break;                       // waiting on the hot-seat handover
       B.timer-=dt;
       if(B.timer<=0){ banner('TIME UP!',''); endAction(); break; }
+      if(B.fired){
+        B.retreatT-=dt;
+        if(B.retreatT<=0){ endAction(); break; }
+      }
       if(isAI(B.team)){
         B.st+=dt;
         // 1. decide whether to reposition, 2. walk, 3. aim, 4. fire
@@ -3711,6 +3760,10 @@ function update(){
         } else if(B.aiMove&&B.st<B.aiMoveEnd){
           // moveActive, not walkHog — this is what lets the AI drive what it crews
           moveActive(h,B.aiMove.dx,B.aiMove.dz,dt);
+        } else if(B.fired){
+          // having shot, the computer gets out of the open like anybody else
+          if(B.aiRetreat===undefined) B.aiRetreat=planAIMove(h)||{dx:0,dz:0};
+          moveActive(h,B.aiRetreat.dx,B.aiRetreat.dz,dt);
         } else if(B.aiMoveEnd!==undefined){
           const fireAt=B.aiMoveEnd+0.85;
           if(!B.aiPlan&&B.st>B.aiMoveEnd+0.25)
@@ -4291,6 +4344,7 @@ window.HOW2={ get B(){return B;}, get screen(){return screenState;}, get campaig
   cycleTouch, get touchPref(){return touchPref;},
   strikeMarker, cycleWeapon,
   camState:cam, genTerrain, planAIMove, planAI, planAIBoard, aiBoard, solveArc, simShot, PHYS_DT, stepProjPhysics,
+  beginRetreat, RETREAT_TIME, get ghostVisible(){return ghostPts.visible;},
   openArmoury, buildArmoury, buyHog, buyWeapon, get coins(){return coins();},
   buildTray, currentWeapon, canUse,
   get boats(){return boats;}, boardBoat, disembark, driveBoat, isNavigable, landNear,
