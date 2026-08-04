@@ -1928,7 +1928,24 @@ function teamAmmo(sq,team,isCamp){
 }
 
 /* camera rig */
-const cam={yaw:0.5,pitch:0.42,dist:30,target:new THREE.Vector3(0,8,0),follow:null};
+const cam={yaw:0.5,pitch:0.42,dist:30,target:new THREE.Vector3(0,8,0),follow:null,userLook:false};
+/* Is the camera currently riding a shell rather than a hog? */
+function followingShot(){
+  if(!cam.follow||!B) return false;
+  for(const p of B.projs) if(p.mesh===cam.follow) return true;
+  for(const pl of (B.planes||[])) if(pl.mesh===cam.follow) return true;
+  return false;
+}
+/* Any look input while we are riding a shell hands the camera back. Freeze the
+   orbit centre where it is so the view does not lurch, and leave it alone until
+   the next turn. Ordinary orbiting around your own hog is untouched — that is
+   not the player wresting the camera away, it is just looking around. */
+function grabCamera(){
+  if(!followingShot()) return;            // orbiting your own hog is not a takeover
+  if(cam.follow&&cam.follow.position) cam.target.copy(cam.follow.position);
+  cam.follow=null;
+  cam.userLook=true;
+}
 /* First person: sighting down the barrel of the direct-fire weapons. Blends in
    and out so switching weapons doesn't snap the view. */
 const FPS_WEAPONS=['rifle','sniper','flame','mg'];
@@ -2243,6 +2260,7 @@ function beginTurn(first){
   newWind();
   B.state='start'; B.st=0; B.timer=45; B.shotHurt=false; B.aiPlan=null; B.charging=false; B.power=0; B.sel=1;
   B.fired=false; B.retreatT=0;
+  cam.userLook=false;                     // a fresh turn takes the camera back
   // pick up where this squad left off, so a near miss is an adjustment
   const prev=B.lastShot&&B.lastShot[B.team];
   B.aimPitch=prev?prev.pitch:0.5;
@@ -2823,7 +2841,7 @@ function fire(h,w,dir,speed){
       spawnProj('shell', origin.addScaledVector(d,2.4),
         d.multiplyScalar(speed*1.06),
         {owner:h, windAcc:B.wind, bounce:false, fuse:null, r:w.r, dmg:w.dmg});
-      cam.follow=B.projs[B.projs.length-1].mesh;   // track the newest shell of the salvo
+      if(!cam.userLook) cam.follow=B.projs[B.projs.length-1].mesh;   // newest shell of the salvo
       sfx('boom'); shake=Math.max(shake,shipboard?2.1:1.3);
       if(gun){                                   // recoil kick on the wheeled gun
         gun.position.addScaledVector(back,-0.55);
@@ -2872,7 +2890,7 @@ function fire(h,w,dir,speed){
   spawnProj(w.id,muzzle(h).addScaledVector(dir,1.4),dir.clone().multiplyScalar(speed),{
     owner:h, windAcc:w.wind?B.wind:0, bounce:w.kind==='bounce'||w.kind==='minetoss',
     fuse:w.kind==='bounce'?w.fuse:null, r:w.r, dmg:w.dmg, cluster:!!w.cluster});
-  cam.follow=B.projs[B.projs.length-1].mesh;
+  if(!cam.userLook) cam.follow=B.projs[B.projs.length-1].mesh;
   beginRetreat();
 }
 function rayGround(from,dir){
@@ -3353,6 +3371,7 @@ addEventListener('mouseup',e=>{ if(!e||e.button===0) mouseHeld=false; dragging=f
 addEventListener('blur',()=>{ mouseHeld=false; dragging=false; });
 addEventListener('mousemove',e=>{
   if(!dragging) return;
+  grabCamera();
   cam.yaw+=(e.clientX-lastMX)*0.005*lookScale();
   cam.pitch+=(e.clientY-lastMY)*0.004*lookScale();
   lastMX=e.clientX; lastMY=e.clientY;
@@ -3503,6 +3522,7 @@ renderer.domElement.addEventListener('touchstart',e=>{
 renderer.domElement.addEventListener('touchmove',e=>{
   e.preventDefault();
   if(e.touches.length===1&&tPrev){
+    grabCamera();
     cam.yaw+=(e.touches[0].clientX-tPrev.x)*0.006*lookScale();
     cam.pitch+=(e.touches[0].clientY-tPrev.y)*0.005*lookScale();
     tPrev={x:e.touches[0].clientX,y:e.touches[0].clientY};
@@ -3642,7 +3662,9 @@ function pollGamepad(dt){
     // right stick walks the bombsight cursor over the map instead of orbiting
     B.bombCursor.x+=rx*dt*55;
     B.bombCursor.z+=ry*dt*55;
-  } else { const ls=lookScale(); cam.yaw+=rx*dt*2.7*ls; cam.pitch+=ry*dt*1.9*ls; }
+  } else { const ls=lookScale();
+    if(Math.abs(rx)>0.15||Math.abs(ry)>0.15) grabCamera();
+    cam.yaw+=rx*dt*2.7*ls; cam.pitch+=ry*dt*1.9*ls; }
   const inBattleAction=screenState==='battle'&&B&&B.state==='action'&&!isAI(B.team);
   if(inBattleAction){
     const h=activeHog();
@@ -3901,7 +3923,7 @@ function update(){
              dmg:pl.napalm?Math.round((pl.dmg||32)*0.55):(pl.dmg||32),
              napalm:!!pl.napalm});
         }
-        cam.follow=B.projs[B.projs.length-1].mesh;
+        if(!cam.userLook) cam.follow=B.projs[B.projs.length-1].mesh;
       }
     }
     if(Math.abs(pl.mesh.position.x)>TW/2+160||Math.abs(pl.mesh.position.z)>TD/2+160){ scene.remove(pl.mesh); B.planes.splice(i,1); }
@@ -3921,7 +3943,7 @@ function update(){
       // the air so a salvo is followed all the way down instead of only the first
       if(cam.follow===p.mesh){
         const next=B.projs.find(q=>q!==p);
-        cam.follow=next?next.mesh:null;
+        cam.follow=(next&&!cam.userLook)?next.mesh:null;
       }
       if(ev.t==='explode'){
         boom(p.position,p.r,p.dmg,p.owner,p.type);
@@ -4146,7 +4168,11 @@ function update(){
     marker.position.set(h.position.x,h.position.y+5+Math.sin(performance.now()*0.005)*0.4,h.position.z);
     marker.rotation.y+=dt*2;
   } else marker.visible=false;
-  if(B.state==='action'&&h&&!isAI(B.team)) cam.follow=h.mesh;
+  /* Follow your own hog — but not while a shell is in the air, and not once the
+     player has taken the camera for themselves. Before retreat time existed
+     firing ended the turn immediately, so this line never contended with the
+     shell camera; now it would snatch it back mid-flight. */
+  if(B.state==='action'&&h&&!isAI(B.team)&&!followingShot()&&!cam.userLook) cam.follow=h.mesh;
   updateHUD(); updateTags(); updateAssetTags(); updateCamera(dt);
   composer.render();
 }
@@ -5098,7 +5124,7 @@ window.HOW2={ get B(){return B;}, get screen(){return screenState;}, get campaig
   cycleTouch, get touchPref(){return touchPref;},
   strikeMarker, cycleWeapon,
   sfx, placeSound, get revBus(){return revBus;}, get AC(){return AC;},
-  camState:cam, genTerrain, planAIMove, planAI, planAIBoard, aiBoard, solveArc, simShot, PHYS_DT, stepProjPhysics,
+  camState:cam, followingShot, grabCamera, genTerrain, planAIMove, planAI, planAIBoard, aiBoard, solveArc, simShot, PHYS_DT, stepProjPhysics,
   beginRetreat, RETREAT_TIME, get ghostVisible(){return ghostPts.visible;},
   openArmoury, buildArmoury, buyHog, buyWeapon, get coins(){return coins();},
   buildTray, currentWeapon, canUse,
