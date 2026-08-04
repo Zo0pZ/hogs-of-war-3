@@ -172,7 +172,7 @@ function speak(t){ try{
   u.rate=1.05; u.pitch=0.85; u.volume=0.9;
   speechSynthesis.speak(u);
 }catch(e){} }
-let AC=null, masterGain=null, sfxOn=true;
+let AC=null, masterGain=null, sfxOn=true, revBus=null, revOut=null;
 try{ sfxOn=localStorage.getItem('hogs3sfx')!=='0'; }catch(e){}
 function audioCtx(){
   if(!AC){
@@ -180,6 +180,24 @@ function audioCtx(){
     masterGain=AC.createGain();
     masterGain.gain.value=sfxOn?0.85:0;
     masterGain.connect(AC.destination);
+    /* An impulse response built from decaying noise — open air off hillsides,
+       not a cathedral. Everything sends into this so sounds have somewhere to
+       decay to instead of stopping dead. */
+    revBus=AC.createConvolver();
+    revBus.buffer=(function(){
+      const len=Math.floor(AC.sampleRate*1.9), buf=AC.createBuffer(2,len,AC.sampleRate);
+      for(let ch=0;ch<2;ch++){
+        const d=buf.getChannelData(ch);
+        for(let i=0;i<len;i++){
+          const u=i/len;
+          // a touch of early scatter, then a smooth tail
+          d[i]=(Math.random()*2-1)*Math.pow(1-u,2.7)*(u<0.06?1.6:1);
+        }
+      }
+      return buf;
+    })();
+    revOut=AC.createGain(); revOut.gain.value=0.5;
+    revBus.connect(revOut); revOut.connect(masterGain);
   }
   return AC;
 }
@@ -189,34 +207,99 @@ function toggleSfx(){
   try{ localStorage.setItem('hogs3sfx',sfxOn?'1':'0'); }catch(e){}
   const b=$('sfxbtn'); if(b) b.textContent='Sound: '+(sfxOn?'ON':'OFF');
 }
-function sfx(kind){ try{
+/* How wet each sound should be. A blast rings off the hills; a UI beep is not
+   in the world at all and gets nothing. */
+const SFX_REVERB={boom:0.9,mg:0.4,shot:0.45,flame:0.16,splash:0.35,launch:0.35,plane:0.25,beep:0};
+/* Route a sound through distance, air absorption and stereo, and report how
+   long it should take to reach the listener. */
+function placeSound(g,pos,wet){
+  if(!pos||!camera){ g.connect(masterGain); return 0; }
+  const dx=pos.x-camera.position.x, dy=pos.y-camera.position.y, dz=pos.z-camera.position.z;
+  const dist=Math.hypot(dx,dy,dz);
+  // air eats the top end with distance — this is the cue that reads as "far"
+  const lp=AC.createBiquadFilter();
+  lp.type='lowpass';
+  lp.frequency.value=clamp(17000*Math.exp(-dist/135),420,17000);
+  const vol=AC.createGain();
+  vol.gain.value=1/(1+Math.pow(dist/52,1.4));
+  g.connect(lp); lp.connect(vol);
+  let tail=vol;
+  if(AC.createStereoPanner){
+    const fwd=new THREE.Vector3(); camera.getWorldDirection(fwd);
+    const right=new THREE.Vector3().crossVectors(fwd,camera.up).normalize();
+    const p=AC.createStereoPanner();
+    p.pan.value=clamp((dx*right.x+dy*right.y+dz*right.z)/Math.max(1,dist),-1,1)*0.85;
+    vol.connect(p); tail=p;
+  }
+  tail.connect(masterGain);
+  if(revBus&&wet>0){
+    const send=AC.createGain();
+    // further away means proportionally more of what you hear is reflection
+    send.gain.value=wet*vol.gain.value*(1+Math.min(1.4,dist/180));
+    tail.connect(send); send.connect(revBus);
+  }
+  return dist/340;                       // speed of sound, near enough
+}
+function sfx(kind,pos){ try{
   if(!sfxOn) return;
   audioCtx();
   if(AC.state==='suspended') AC.resume();
-  const t=AC.currentTime, g=AC.createGain();
-  g.connect(masterGain);
+  const g=AC.createGain();
+  const lag=placeSound(g,pos,SFX_REVERB[kind]!==undefined?SFX_REVERB[kind]:0.3);
+  const t=AC.currentTime+lag;
   const env=(v,d)=>{ g.gain.setValueAtTime(v,t); g.gain.exponentialRampToValueAtTime(0.001,t+d); };
   if(kind==='boom'){
-    const bufferSize=AC.sampleRate*1.5;
+    /* Three layers arriving together: the crack of the shock front, the body of
+       the blast, and a sub thump you feel more than hear. One filtered noise
+       burst on its own read as a puff of static. Every value is jittered a
+       little, because a sound that is identical every time stops convincing. */
+    const vary=0.85+Math.random()*0.3;
+    // body
+    const bufferSize=Math.floor(AC.sampleRate*1.5);
     const buffer=AC.createBuffer(1,bufferSize,AC.sampleRate);
     const data=buffer.getChannelData(0);
-    for(let i=0;i<bufferSize;i++) data[i]=Math.random()*2-1;
+    for(let i=0;i<bufferSize;i++){
+      const u=i/bufferSize;
+      data[i]=(Math.random()*2-1)*Math.pow(1-u,1.15);     // debris tail in the decay
+    }
     const noise=AC.createBufferSource(); noise.buffer=buffer;
     const filter=AC.createBiquadFilter();
     filter.type='lowpass';
-    filter.frequency.setValueAtTime(1000,t);
-    filter.frequency.exponentialRampToValueAtTime(50,t+1.2);
-    g.gain.setValueAtTime(0.9,t);              // was 1.5 — clipped through the master bus
-    g.gain.exponentialRampToValueAtTime(0.01,t+1.4);
+    filter.frequency.setValueAtTime(1100*vary,t);
+    filter.frequency.exponentialRampToValueAtTime(45,t+1.25);
+    g.gain.setValueAtTime(0.82,t);
+    g.gain.exponentialRampToValueAtTime(0.01,t+1.45);
     noise.connect(filter); filter.connect(g);
     noise.start(t); noise.stop(t+1.5);
+    // crack: the sharp front edge
+    const cLen=Math.floor(AC.sampleRate*0.07);
+    const cBuf=AC.createBuffer(1,cLen,AC.sampleRate);
+    const cD=cBuf.getChannelData(0);
+    for(let i=0;i<cLen;i++) cD[i]=(Math.random()*2-1)*Math.pow(1-i/cLen,3.4);
+    const crack=AC.createBufferSource(); crack.buffer=cBuf;
+    const hp=AC.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=900*vary;
+    const cg=AC.createGain(); cg.gain.setValueAtTime(0.5,t);
+    cg.gain.exponentialRampToValueAtTime(0.001,t+0.09);
+    crack.connect(hp); hp.connect(cg); cg.connect(g);
+    crack.start(t); crack.stop(t+0.08);
+    // sub: the thump underneath
+    const sub=AC.createOscillator(); sub.type='sine';
+    sub.frequency.setValueAtTime(88*vary,t);
+    sub.frequency.exponentialRampToValueAtTime(31,t+0.5);
+    const sg=AC.createGain();
+    sg.gain.setValueAtTime(0.0001,t);
+    sg.gain.exponentialRampToValueAtTime(0.75,t+0.02);
+    sg.gain.exponentialRampToValueAtTime(0.001,t+0.62);
+    sub.connect(sg); sg.connect(g);
+    sub.start(t); sub.stop(t+0.65);
   } else if(kind==='mg'){
     // sharp cracking report: filtered noise burst + a click transient
     const n=AC.createBufferSource(), buf=AC.createBuffer(1,AC.sampleRate*0.09,AC.sampleRate);
     const d0=buf.getChannelData(0);
     for(let i=0;i<d0.length;i++) d0[i]=(Math.random()*2-1)*Math.pow(1-i/d0.length,2.2);
     n.buffer=buf;
-    const bp=AC.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1750; bp.Q.value=0.9;
+    const bp=AC.createBiquadFilter(); bp.type='bandpass';
+    bp.frequency.value=1750*(0.9+Math.random()*0.22); bp.Q.value=0.9;
     g.gain.setValueAtTime(0.5,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.1);
     n.connect(bp); bp.connect(g); n.start(t); n.stop(t+0.1);
   } else if(kind==='flame'){
@@ -2256,7 +2339,7 @@ function jumpHog(h){
   h.vel.set(Math.cos(az)*5,11,Math.sin(az)*5);
 }
 function drown(h){
-  h.dead=true; sfx('splash');
+  h.dead=true; sfx('splash',h.position);
   if(B&&B.stats){ ST(h.team).drowned++; ST(h.team).losses++; }
   spawnParticles(h.position.clone().setY(waterLevel),14,0x7f9bb0,4);
   bubble(h,pick(Q.drown));
@@ -2421,7 +2504,7 @@ function spawnParticles(pos,n,color,speed){
 }
 function boomFX(pos,r){
   if(!B) return;
-  sfx('boom'); shake=Math.max(shake,Math.min(6.5,r*0.65));
+  sfx('boom',pos); shake=Math.max(shake,Math.min(6.5,r*0.65));
   spawn3DExplosion(pos.x,pos.y+0.2,pos.z,r,scene);
   spawnParticles(pos,38,0xffcc00,r*1.9);
   spawnParticles(pos,18,0xff6600,r*1.4);
@@ -2679,7 +2762,7 @@ function fire(h,w,dir,speed){
       const d=dir.clone();
       d.x+=(rnd()-0.5)*w.spread; d.y+=(rnd()-0.5)*w.spread*0.7; d.z+=(rnd()-0.5)*w.spread;
       hitscan(h,d.normalize(),w.range,w.dmg,'mg',1.1);
-      sfx('mg'); muzzleFlash(h);
+      sfx('mg',h.position); muzzleFlash(h);
       n++; setTimeout(rip,70);
     };
     rip();
@@ -2689,7 +2772,7 @@ function fire(h,w,dir,speed){
   }
   if(w.kind==='flame'){          // flamethrower: short cone, lots of little burning ticks
     bubble(h,pick(['Crackling, anyone?','Toasty!','Roast pork tonight!']));
-    sfx('flame');
+    sfx('flame',h.position);
     let n=0;
     const myB=B;
     const lick=()=>{
@@ -2706,7 +2789,7 @@ function fire(h,w,dir,speed){
       scene.add(f);
       B.parts.push({mesh:f,smoke:true,vel:d.clone().multiplyScalar(15+Math.random()*8),life:0.45+Math.random()*0.25});
       hitscan(h,d,reach,w.dmg,'flame',1.9);
-      if(n%4===0) sfx('flame');
+      if(n%4===0) sfx('flame',h.position);
       n++; setTimeout(lick,45);
     };
     lick();
@@ -5014,6 +5097,7 @@ window.HOW2={ get B(){return B;}, get screen(){return screenState;}, get campaig
   get touch(){return touch;}, get isTouch(){return isTouch;}, setTouchMode, looksLikeTouchDevice,
   cycleTouch, get touchPref(){return touchPref;},
   strikeMarker, cycleWeapon,
+  sfx, placeSound, get revBus(){return revBus;}, get AC(){return AC;},
   camState:cam, genTerrain, planAIMove, planAI, planAIBoard, aiBoard, solveArc, simShot, PHYS_DT, stepProjPhysics,
   beginRetreat, RETREAT_TIME, get ghostVisible(){return ghostPts.visible;},
   openArmoury, buildArmoury, buyHog, buyWeapon, get coins(){return coins();},
