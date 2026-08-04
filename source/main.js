@@ -284,14 +284,72 @@ stage.insertBefore(renderer.domElement,stage.firstChild);
 const scene=new THREE.Scene();
 const camera=new THREE.PerspectiveCamera(55,16/9,0.1,900);
 const composer=new EffectComposer(renderer);
+/* ================= CEL SHADING =================
+   A four-step ramp sampled with NEAREST filtering: light quantises to four
+   flat tones instead of a smooth falloff, which is what gives the drawn look. */
+const TOON_RAMP=(function(){
+  const c=document.createElement('canvas'); c.width=4; c.height=1;
+  const x=c.getContext('2d');
+  const steps=['#4a4033','#8a7c63','#c8bda0','#ffffff'];
+  steps.forEach((s,i)=>{ x.fillStyle=s; x.fillRect(i,0,1,1); });
+  const t=new THREE.CanvasTexture(c);
+  t.minFilter=t.magFilter=THREE.NearestFilter;
+  t.generateMipmaps=false;
+  t.colorSpace=THREE.SRGBColorSpace;
+  return t;
+})();
+/* Everything was authored against MeshStandardMaterial. Rather than rewrite 70
+   call sites by hand, translate the parameters: toon has no roughness or
+   metalness, and passing them would only earn a console warning apiece. */
+function toonMat(p){
+  p=p||{};
+  const o={gradientMap:TOON_RAMP};
+  for(const k of ['color','map','transparent','opacity','side','depthWrite',
+                  'vertexColors','emissive','emissiveIntensity',
+                  'alphaTest','fog','name'])
+    if(p[k]!==undefined) o[k]=p[k];
+  const mat=new THREE.MeshToonMaterial(o);
+  /* flatShading lives on the base Material class but is absent from
+     MeshToonMaterial's own defaults, so handing it to the constructor earns a
+     warning AND is silently dropped — which quietly cost us the faceted
+     low-poly look. Assigning it afterwards does apply, and says nothing. */
+  if(p.flatShading) mat.flatShading=true;
+  return mat;
+}
+/* The ink line: a back-facing copy of the mesh, pushed out slightly. Only the
+   expanded silhouette survives depth testing, so it reads as a drawn outline.
+   Applied to characters, vehicles and props — not to the thousand-odd building
+   blocks, which would double the draw calls for very little gain now that they
+   are flat-shaded slabs. */
+const INK=new THREE.MeshBasicMaterial({color:0x241d15,side:THREE.BackSide});
+function addOutline(root,k){
+  if(!root) return root;
+  k=k||0.055;
+  const targets=[];
+  root.traverse(o=>{ if(o.isMesh&&!o.userData.ink) targets.push(o); });
+  for(const mesh of targets){
+    if(!mesh.parent) continue;
+    const shell=new THREE.Mesh(mesh.geometry,INK);
+    shell.position.copy(mesh.position);
+    shell.rotation.copy(mesh.rotation);
+    shell.quaternion.copy(mesh.quaternion);
+    shell.scale.copy(mesh.scale).multiplyScalar(1+k);
+    shell.userData.ink=true;
+    shell.castShadow=false; shell.receiveShadow=false;
+    mesh.parent.add(shell);
+  }
+  return root;
+}
 const renderPass=new RenderPass(scene,camera);
 composer.addPass(renderPass);
+/* Ambient occlusion is deliberately absent: soft contact shading is the first
+   thing a flat comic style discards, and it blurred every band edge. */
 const ssaoPass=new SSAOPass(scene,camera,window.innerWidth,window.innerHeight);
 ssaoPass.kernelRadius=5;
 ssaoPass.minDistance=0.018;
 ssaoPass.maxDistance=0.035;
-composer.addPass(ssaoPass);
-const bloomPass=new UnrealBloomPass(new THREE.Vector2(window.innerWidth,window.innerHeight),0.25,0.4,0.95);
+// composer.addPass(ssaoPass);   // see above — fights the cel shading
+const bloomPass=new UnrealBloomPass(new THREE.Vector2(window.innerWidth,window.innerHeight),0.34,0.5,0.9);
 composer.addPass(bloomPass);
 const outputPass=new OutputPass();
 composer.addPass(outputPass);
@@ -317,8 +375,8 @@ function resize(){
 }
 addEventListener('resize',resize);
 
-const hemi=new THREE.HemisphereLight(0xf2e8cc,0x6b5a3a,0.85); scene.add(hemi);
-const keyLight=new THREE.DirectionalLight(0xfff5ea,1.2);
+const hemi=new THREE.HemisphereLight(0xffdcae,0x5a4632,0.72); scene.add(hemi);
+const keyLight=new THREE.DirectionalLight(0xffd9a0,1.45);   // low warm sun
 keyLight.position.set(50,80,40); keyLight.castShadow=true;
 keyLight.shadow.mapSize.set(2048,2048);
 keyLight.shadow.camera.near=0.5; keyLight.shadow.camera.far=200;
@@ -326,11 +384,11 @@ keyLight.shadow.camera.left=-60; keyLight.shadow.camera.right=60;
 keyLight.shadow.camera.top=60; keyLight.shadow.camera.bottom=-60;
 keyLight.shadow.bias=-0.0005;
 scene.add(keyLight);
-const fillLight=new THREE.DirectionalLight(0x8fa3c0,0.3);
+const fillLight=new THREE.DirectionalLight(0x7f93b8,0.22);  // kept low so the bands stay crisp
 fillLight.position.set(-40,30,-30); scene.add(fillLight);
-const rimLight=new THREE.DirectionalLight(0xffdfa9,0.8);
+const rimLight=new THREE.DirectionalLight(0xffc98a,1.05);   // backlight, as on the poster
 rimLight.position.set(0,20,-50); scene.add(rimLight);
-const ambientLight=new THREE.AmbientLight(0xb9c0c4,0.15); scene.add(ambientLight);
+const ambientLight=new THREE.AmbientLight(0xc9b493,0.12); scene.add(ambientLight);
 
 /* ---- graphics quality ----
    Each tier sets both the effect stack and how many real pixels we render.
@@ -419,7 +477,7 @@ for(let i=0;i<10;i++){
 scene.add(clouds);
 
 // water — segmented + animated low-poly waves
-const waterMat=new THREE.MeshStandardMaterial({color:0x39647a,transparent:true,opacity:0.88,roughness:0.3,metalness:0.15,flatShading:true});
+const waterMat=toonMat({color:0x39647a,transparent:true,opacity:0.88,roughness:0.3,metalness:0.15,flatShading:true});
 const waterGeo=new THREE.PlaneGeometry(900,620,56,38);
 const water=new THREE.Mesh(waterGeo,waterMat);
 water.rotation.x=-Math.PI/2; water.position.y=WATER_Y; scene.add(water);
@@ -552,7 +610,7 @@ function buildTerrainMesh(){
   g.setAttribute('uv',new THREE.BufferAttribute(uv,2));
   g.setIndex(ind); g.computeVertexNormals();
   baseColors=col.slice();
-  terrainMesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({vertexColors:true,map:detailTex,flatShading:true,roughness:0.95,metalness:0}));
+  terrainMesh=new THREE.Mesh(g,toonMat({vertexColors:true,map:detailTex,flatShading:true,roughness:0.95,metalness:0}));
   terrainMesh.receiveShadow=true; terrainMesh.castShadow=false;
   scene.add(terrainMesh);
 }
@@ -595,15 +653,15 @@ function crater(x,z,r,depth){
 
 /* ================= DESTRUCTIBLE STRUCTURES ================= */
 const unitBox=new THREE.BoxGeometry(1,1,1);
-const brickMat=new THREE.MeshStandardMaterial({color:0x9a5b45,roughness:0.9,flatShading:true});
-const brickMat2=new THREE.MeshStandardMaterial({color:0x8d503c,roughness:0.9,flatShading:true});
-const roofMat=new THREE.MeshStandardMaterial({color:0x6e4a38,roughness:0.85,flatShading:true});
-const woodMat=new THREE.MeshStandardMaterial({color:0x7a5c3a,roughness:0.95,flatShading:true});
-const concreteMat=new THREE.MeshStandardMaterial({color:0x8d8d82,roughness:0.95,flatShading:true});
-const stoneMat=new THREE.MeshStandardMaterial({color:0xa8a094,roughness:0.95,flatShading:true});
-const stoneMat2=new THREE.MeshStandardMaterial({color:0x9a9286,roughness:0.95,flatShading:true});
-const sandbagMat=new THREE.MeshStandardMaterial({color:0x9a8a5e,roughness:1,flatShading:true});
-const folMat=new THREE.MeshStandardMaterial({color:0x4e6b2e,roughness:0.95,flatShading:true});
+const brickMat=toonMat({color:0x9a5b45,roughness:0.9,flatShading:true});
+const brickMat2=toonMat({color:0x8d503c,roughness:0.9,flatShading:true});
+const roofMat=toonMat({color:0x6e4a38,roughness:0.85,flatShading:true});
+const woodMat=toonMat({color:0x7a5c3a,roughness:0.95,flatShading:true});
+const concreteMat=toonMat({color:0x8d8d82,roughness:0.95,flatShading:true});
+const stoneMat=toonMat({color:0xa8a094,roughness:0.95,flatShading:true});
+const stoneMat2=toonMat({color:0x9a9286,roughness:0.95,flatShading:true});
+const sandbagMat=toonMat({color:0x9a8a5e,roughness:1,flatShading:true});
+const folMat=toonMat({color:0x4e6b2e,roughness:0.95,flatShading:true});
 let buildings=[], props=[], debris=[], loose=[], hazards=[], boats=[], tanks=[], emplacements=[];
 function clearStructures(){
   for(const bd of buildings) for(const b of bd.blocks) scene.remove(b.mesh);
@@ -825,13 +883,13 @@ function buildSandbags(cx,cz){
 function spawn1940sHouse(x,y,z,sceneRef=scene,style='cottage'){
   const bd=newBuilding(x,z);
   const y0=heightAt(x,z);
-  const wallMat  =new THREE.MeshStandardMaterial({color:0xc9b896,roughness:0.95,flatShading:true});
-  const wallMat2 =new THREE.MeshStandardMaterial({color:0xbeae8a,roughness:0.95,flatShading:true});
-  const roofMat  =new THREE.MeshStandardMaterial({color:0x4a3b28,roughness:0.82,flatShading:true});
-  const trimMat  =new THREE.MeshStandardMaterial({color:0x7e5f3b,roughness:0.86,flatShading:true});
-  const doorMat  =new THREE.MeshStandardMaterial({color:0x5a3620,roughness:0.92,flatShading:true});
-  const windowMat=new THREE.MeshStandardMaterial({color:0x9ec6de,emissive:0x14293a,roughness:0.25,metalness:0.1,flatShading:true});
-  const chimMat  =new THREE.MeshStandardMaterial({color:0x6f4d2d,roughness:0.9,flatShading:true});
+  const wallMat  =toonMat({color:0xc9b896,roughness:0.95,flatShading:true});
+  const wallMat2 =toonMat({color:0xbeae8a,roughness:0.95,flatShading:true});
+  const roofMat  =toonMat({color:0x4a3b28,roughness:0.82,flatShading:true});
+  const trimMat  =toonMat({color:0x7e5f3b,roughness:0.86,flatShading:true});
+  const doorMat  =toonMat({color:0x5a3620,roughness:0.92,flatShading:true});
+  const windowMat=toonMat({color:0x9ec6de,emissive:0x14293a,roughness:0.25,metalness:0.1,flatShading:true});
+  const chimMat  =toonMat({color:0x6f4d2d,roughness:0.9,flatShading:true});
 
   const P = style==='shed'  ? {W:10.4,D:7.4,H:4.6,rows:4,gable:0.30}
           : style==='block' ? {W:9.4, D:7.4,H:5.8,rows:5,gable:0.20}
@@ -879,9 +937,9 @@ function spawn1940sHouse(x,y,z,sceneRef=scene,style='cottage'){
    sudden death floods the low ground and breaks the map into islands. */
 function makeLandingCraft(){
   const g=new THREE.Group();
-  const hullM=new THREE.MeshStandardMaterial({color:0x3a4048,roughness:0.55,metalness:0.3,flatShading:true});
-  const tubeM=new THREE.MeshStandardMaterial({color:0x22262b,roughness:0.85,flatShading:true});
-  const deckM=new THREE.MeshStandardMaterial({color:0x4a5058,roughness:0.8,flatShading:true});
+  const hullM=toonMat({color:0x3a4048,roughness:0.55,metalness:0.3,flatShading:true});
+  const tubeM=toonMat({color:0x22262b,roughness:0.85,flatShading:true});
+  const deckM=toonMat({color:0x4a5058,roughness:0.8,flatShading:true});
   const L=8.0, W=3.4;
   // rigid hull with inflatable collar
   const hull=new THREE.Mesh(new THREE.BoxGeometry(L,1.0,W-0.7),hullM);
@@ -898,7 +956,7 @@ function makeLandingCraft(){
   const console_=new THREE.Mesh(new THREE.BoxGeometry(1.0,0.85,1.5),deckM);
   console_.position.set(-1.2,1.55,0); g.add(console_);
   const screen=new THREE.Mesh(new THREE.BoxGeometry(0.1,0.5,1.1),
-    new THREE.MeshStandardMaterial({color:0x2a3a44,emissive:0x0e2a33,roughness:0.3}));
+    toonMat({color:0x2a3a44,emissive:0x0e2a33,roughness:0.3}));
   screen.position.set(-0.68,1.75,0); g.add(screen);
   const gunMount=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.3,1.0,7),tubeM);
   gunMount.position.set(2.4,1.55,0); g.add(gunMount);
@@ -1051,9 +1109,9 @@ function updateBoats(dt){
    aboard, and her main battery reaches anywhere on the map. */
 function makeDestroyer(){
   const g=new THREE.Group();
-  const hullM=new THREE.MeshStandardMaterial({color:0x4a5158,roughness:0.72,metalness:0.4,flatShading:true});
-  const deckM=new THREE.MeshStandardMaterial({color:0x33383d,roughness:0.95,flatShading:true});
-  const islandM=new THREE.MeshStandardMaterial({color:0x3d444a,roughness:0.7,metalness:0.35,flatShading:true});
+  const hullM=toonMat({color:0x4a5158,roughness:0.72,metalness:0.4,flatShading:true});
+  const deckM=toonMat({color:0x33383d,roughness:0.95,flatShading:true});
+  const islandM=toonMat({color:0x3d444a,roughness:0.7,metalness:0.35,flatShading:true});
   const lineM=new THREE.MeshBasicMaterial({color:0xd8d2b8});
   const L=54, W=11;
   const hull=new THREE.Mesh(new THREE.BoxGeometry(L,5.2,W),hullM);
@@ -1076,19 +1134,19 @@ function makeDestroyer(){
   const island=new THREE.Mesh(new THREE.BoxGeometry(7.5,4.2,3.4),islandM);
   island.position.set(-6,7.3,W/2+1.2); g.add(island);
   const bridge=new THREE.Mesh(new THREE.BoxGeometry(5,1.6,3.0),
-    new THREE.MeshStandardMaterial({color:0x2a3238,roughness:0.35,metalness:0.5,flatShading:true}));
+    toonMat({color:0x2a3238,roughness:0.35,metalness:0.5,flatShading:true}));
   bridge.position.set(-6,9.9,W/2+1.2); g.add(bridge);
   const mast=new THREE.Mesh(new THREE.BoxGeometry(0.35,5.5,0.35),islandM);
   mast.position.set(-7.5,13.2,W/2+1.2); g.add(mast);
   for(let i=0;i<3;i++){                           // radar panels
     const rad=new THREE.Mesh(new THREE.BoxGeometry(0.2,1.5,1.5),
-      new THREE.MeshStandardMaterial({color:0x555f66,roughness:0.5,metalness:0.5}));
+      toonMat({color:0x555f66,roughness:0.5,metalness:0.5}));
     rad.position.set(-4.2,8.6,W/2+1.2); rad.rotation.y=i*2.1; g.add(rad);
   }
   // parked aircraft on the deck
   for(let i=0;i<3;i++){
     const jet=new THREE.Group();
-    const jm=new THREE.MeshStandardMaterial({color:0x596069,roughness:0.5,metalness:0.45,flatShading:true});
+    const jm=toonMat({color:0x596069,roughness:0.5,metalness:0.45,flatShading:true});
     const fus=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.22,3.6,7),jm);
     fus.rotation.z=Math.PI/2; jet.add(fus);
     const wg=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.1,3.4),jm); jet.add(wg);
@@ -1203,8 +1261,8 @@ function updateShips(dt){
    the trade is that you're slow, loud, and a very obvious target. */
 function makeTank(){
   const g=new THREE.Group();
-  const hullM=new THREE.MeshStandardMaterial({color:0x6a6a58,roughness:0.72,metalness:0.35,flatShading:true});
-  const darkM=new THREE.MeshStandardMaterial({color:0x33352c,roughness:0.85,metalness:0.3,flatShading:true});
+  const hullM=toonMat({color:0x6a6a58,roughness:0.72,metalness:0.35,flatShading:true});
+  const darkM=toonMat({color:0x33352c,roughness:0.85,metalness:0.3,flatShading:true});
   // low, sloped, angular — composite armour rather than riveted steel
   const hull=new THREE.Mesh(new THREE.BoxGeometry(8.2,1.3,4.6),hullM);
   hull.position.y=1.55; g.add(hull);
@@ -1237,6 +1295,7 @@ function makeTank(){
   cwsGun.rotation.z=-Math.PI/2; cwsGun.position.set(0.2,3.65,0.75); turret.add(cwsGun);
   g.add(turret); g.userData.turret=turret;
   g.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
+  addOutline(g,0.028);
   return g;
 }
 function spawnTank(x,z,yaw){
@@ -1368,9 +1427,9 @@ function damageTank(t,amount,owner){
    Stand at one and you can fire it for free — no drain on your own ammo. */
 function buildDefenceBase(cx,cz){
   const bd=newBuilding(cx,cz), y0=heightAt(cx,cz);
-  const sandM=new THREE.MeshStandardMaterial({color:0x9a8a5e,roughness:1,flatShading:true});
-  const sandM2=new THREE.MeshStandardMaterial({color:0x8d7e54,roughness:1,flatShading:true});
-  const concM=new THREE.MeshStandardMaterial({color:0x8d8d82,roughness:0.95,flatShading:true});
+  const sandM=toonMat({color:0x9a8a5e,roughness:1,flatShading:true});
+  const sandM2=toonMat({color:0x8d7e54,roughness:1,flatShading:true});
+  const concM=toonMat({color:0x8d8d82,roughness:0.95,flatShading:true});
   // sandbag horseshoe
   for(let k=0;k<11;k++){
     const a=-2.5+k*0.42;
@@ -1388,7 +1447,7 @@ function buildDefenceBase(cx,cz){
   emplacements.push({type:'arty',mesh:gun,x:cx+1.2,z:cz-1.4,y:y0,shots:2});
   // machine-gun nest
   const nest=new THREE.Group();
-  const mgM=new THREE.MeshStandardMaterial({color:0x40453a,roughness:0.6,metalness:0.5,flatShading:true});
+  const mgM=toonMat({color:0x40453a,roughness:0.6,metalness:0.5,flatShading:true});
   const tripod=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.5,1.1,6),mgM);
   tripod.position.y=0.55; nest.add(tripod);
   const body=new THREE.Mesh(new THREE.BoxGeometry(1.5,0.4,0.35),mgM);
@@ -1411,9 +1470,9 @@ function emplacementAt(pos,rad){
    snappier bang than the fuel kegs, but it chain-reacts just the same. */
 function spawnAmmoCrate(x,y,z,big){
   const g=new THREE.Group();
-  const woodM=new THREE.MeshStandardMaterial({color:0x8a6a3c,roughness:0.95,flatShading:true});
-  const bandM=new THREE.MeshStandardMaterial({color:0x5c5236,roughness:0.8,metalness:0.3,flatShading:true});
-  const stencilM=new THREE.MeshStandardMaterial({color:0xb8ac82,roughness:0.9});
+  const woodM=toonMat({color:0x8a6a3c,roughness:0.95,flatShading:true});
+  const bandM=toonMat({color:0x5c5236,roughness:0.8,metalness:0.3,flatShading:true});
+  const stencilM=toonMat({color:0xb8ac82,roughness:0.9});
   const box=(bx,by,bz,s,rot)=>{
     const b=new THREE.Mesh(new THREE.BoxGeometry(s*1.5,s*0.95,s),woodM);
     b.position.set(bx,by,bz); b.rotation.y=rot; g.add(b);
@@ -1438,15 +1497,15 @@ function spawnAmmoCrate(x,y,z,big){
 }
 function spawnExplosiveKeg(x,y,z,sceneRef=scene){
   const keg=new THREE.Group();
-  const bodyMat=new THREE.MeshStandardMaterial({color:0x9ba5ae,metalness:0.8,roughness:0.45});
-  const bandMat=new THREE.MeshStandardMaterial({color:0x7a4f29,metalness:0.35,roughness:0.8});
+  const bodyMat=toonMat({color:0x9ba5ae,metalness:0.8,roughness:0.45});
+  const bandMat=toonMat({color:0x7a4f29,metalness:0.35,roughness:0.8});
   const R=1.05, Hk=2.8;
   const body=new THREE.Mesh(new THREE.CylinderGeometry(R,R*1.06,Hk,14),bodyMat);
   const top=new THREE.Mesh(new THREE.CylinderGeometry(R*1.04,R*1.04,0.16,14),bodyMat);
   const bottom=new THREE.Mesh(new THREE.CylinderGeometry(R*1.04,R*1.04,0.16,14),bodyMat);
   top.position.y=Hk/2; bottom.position.y=-Hk/2;
   const stripe=new THREE.Mesh(new THREE.CylinderGeometry(R*1.07,R*1.07,0.34,14),
-    new THREE.MeshStandardMaterial({color:0xaa3322,roughness:0.7}));
+    toonMat({color:0xaa3322,roughness:0.7}));
   keg.add(body,top,bottom,stripe);
   for(const yy of [-0.75,0.75]){
     const band=new THREE.Mesh(new THREE.TorusGeometry(R*1.05,0.09,7,16),bandMat);
@@ -1563,7 +1622,7 @@ function scatterProps(){
       if(rnd()<0.68){
         const lean=(rnd()-0.5)*0.22, ht=3.4+rnd()*1.8;
         const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.3,ht,7),
-          new THREE.MeshStandardMaterial({color:0x8a6b42,roughness:0.95,flatShading:true}));
+          toonMat({color:0x8a6b42,roughness:0.95,flatShading:true}));
         trunk.position.y=ht/2; trunk.rotation.z=lean; g.add(trunk);
         const top=new THREE.Vector3(Math.sin(lean)*-ht/2,ht,0);
         const nf=6+Math.floor(rnd()*3);
@@ -1578,10 +1637,10 @@ function scatterProps(){
           g.add(frond);
         }
         const nuts=new THREE.Mesh(new THREE.SphereGeometry(0.3,7,5),
-          new THREE.MeshStandardMaterial({color:0xa8763a,roughness:0.9}));
+          toonMat({color:0xa8763a,roughness:0.9}));
         nuts.position.copy(top).y-=0.35; g.add(nuts);
       } else {
-        const scrubMat=new THREE.MeshStandardMaterial({color:0x9aa05e,roughness:1,flatShading:true});
+        const scrubMat=toonMat({color:0x9aa05e,roughness:1,flatShading:true});
         for(let i=0;i<4;i++){
           const b=new THREE.Mesh(new THREE.SphereGeometry(0.45+rnd()*0.4,6,4),scrubMat);
           b.position.set((rnd()-0.5)*1.5,0.3+rnd()*0.35,(rnd()-0.5)*1.5);
@@ -1606,7 +1665,7 @@ function scatterProps(){
     const g=new THREE.Group();
     for(let i=0;i<3;i++){
       const bar=new THREE.Mesh(new THREE.BoxGeometry(0.22,2.4,0.22),
-        new THREE.MeshStandardMaterial({color:0x4c4a44,roughness:0.7,metalness:0.5,flatShading:true}));
+        toonMat({color:0x4c4a44,roughness:0.7,metalness:0.5,flatShading:true}));
       bar.rotation.set(rnd()*0.5+(i===0?0.9:0.4),i*2.1,0.6);
       g.add(bar);
     }
@@ -1617,21 +1676,21 @@ function scatterProps(){
 }
 
 /* ================= PIG FACTORY ================= */
-const pinkMat=new THREE.MeshStandardMaterial({color:0xe8a0a8,roughness:0.6,metalness:0.0});
-const pinkDark=new THREE.MeshStandardMaterial({color:0xd98a95,roughness:0.75,metalness:0.0});
-const snoutMat=new THREE.MeshStandardMaterial({color:0xf0b3ba,roughness:0.6,metalness:0.0});
-const eyeMat=new THREE.MeshStandardMaterial({color:0x2b2416,roughness:0.4,metalness:0.0});
+const pinkMat=toonMat({color:0xf2adb2});
+const pinkDark=toonMat({color:0xdd939c});
+const snoutMat=toonMat({color:0xf7bfc4});
+const eyeMat=toonMat({color:0x2b2416,roughness:0.4,metalness:0.0});
 function makePig(helmColor){
   const g=new THREE.Group();
   const body=new THREE.Mesh(new THREE.SphereGeometry(1,18,14),pinkMat);
   body.scale.set(1.15,0.95,0.9); body.position.y=0.95; g.add(body);
   // plate carrier over the torso
-  const rigMat=new THREE.MeshStandardMaterial({color:0x4a4f42,roughness:0.85,flatShading:true});
-  const rig=new THREE.Mesh(new THREE.BoxGeometry(1.5,1.15,1.75),rigMat);
-  rig.position.set(-0.1,1.0,0); g.add(rig);
+  const rigMat=toonMat({color:0x4a4f42,roughness:0.85,flatShading:true});
+  const rig=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.78,1.42),rigMat);
+  rig.position.set(0.05,1.12,0); g.add(rig);
   for(const s of [-1,1]){                       // magazine pouches
     const pouch=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.42,0.34),
-      new THREE.MeshStandardMaterial({color:0x3c4136,roughness:0.9,flatShading:true}));
+      toonMat({color:0x3c4136,roughness:0.9,flatShading:true}));
     pouch.position.set(0.42,0.78,s*0.5); g.add(pouch);
   }
   const head=new THREE.Mesh(new THREE.SphereGeometry(0.62,16,12),pinkMat);
@@ -1648,38 +1707,39 @@ function makePig(helmColor){
       leg.position.set(0.55*f,0.28,0.42*s); g.add(leg);
     }
   }
-  const helmMat=new THREE.MeshStandardMaterial({color:helmColor,roughness:0.7,metalness:0.15,flatShading:true});
+  const helmMat=toonMat({color:helmColor,roughness:0.7,metalness:0.15,flatShading:true});
   // modern ballistic helmet: rounded shell, no wide brim
   const helm=new THREE.Mesh(new THREE.SphereGeometry(0.7,16,10,0,Math.PI*2,0,Math.PI*0.58),helmMat);
   helm.position.set(0.95,1.5,0); helm.scale.set(1.06,1.0,1.06); g.add(helm);
   const rail=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.09,0.62),
-    new THREE.MeshStandardMaterial({color:0x2c2f28,roughness:0.6,flatShading:true}));
+    toonMat({color:0x2c2f28,roughness:0.6,flatShading:true}));
   rail.position.set(0.95,1.95,0); g.add(rail);
   // night-vision mount on the brow
   const nvg=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.22,0.34),
-    new THREE.MeshStandardMaterial({color:0x25281f,roughness:0.5,metalness:0.4,flatShading:true}));
+    toonMat({color:0x25281f,roughness:0.5,metalness:0.4,flatShading:true}));
   nvg.position.set(1.42,1.86,0); g.add(nvg);
   // comms headset
   for(const s of [-1,1]){
     const cup=new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.17,0.14,10),
-      new THREE.MeshStandardMaterial({color:0x2c2f28,roughness:0.7,flatShading:true}));
+      toonMat({color:0x2c2f28,roughness:0.7,flatShading:true}));
     cup.rotation.x=Math.PI/2; cup.position.set(0.92,1.44,s*0.6); g.add(cup);
   }
   // rank pips on the helmet
-  const pip=new THREE.MeshStandardMaterial({color:0xd8d2b0,roughness:0.6});
+  const pip=toonMat({color:0xd8d2b0,roughness:0.6});
   g.userData.pips=[];
   g.traverse(o=>{ if(o.isMesh){ o.castShadow=true; } });
+  addOutline(g,0.05);
   g.scale.setScalar(1.32);
   return g;
 }
 // elite hogs swap the tin hat for a rakish beret
 function addBeret(g,helmColor){
   const beret=new THREE.Mesh(new THREE.SphereGeometry(0.66,14,9,0,Math.PI*2,0,Math.PI*0.55),
-    new THREE.MeshStandardMaterial({color:0x6d2230,roughness:0.85,flatShading:true}));
+    toonMat({color:0x6d2230,roughness:0.85,flatShading:true}));
   beret.position.set(0.95,1.62,0); beret.scale.set(1.06,0.62,1.06); beret.rotation.z=-0.22;
   g.add(beret);
   const badge=new THREE.Mesh(new THREE.CircleGeometry(0.12,10),
-    new THREE.MeshStandardMaterial({color:0xd8b34a,roughness:0.4,metalness:0.6}));
+    toonMat({color:0xd8b34a,roughness:0.4,metalness:0.6}));
   badge.position.set(1.42,1.72,0.2); badge.rotation.y=Math.PI/2;
   g.add(badge);
   beret.castShadow=true;
@@ -1687,7 +1747,7 @@ function addBeret(g,helmColor){
 }
 function makeGrave(){
   const g=new THREE.Group();
-  const m=new THREE.MeshStandardMaterial({color:0x5a4a34,roughness:0.9});
+  const m=toonMat({color:0x5a4a34,roughness:0.9});
   const v=new THREE.Mesh(new THREE.BoxGeometry(0.25,2.0,0.25),m); v.position.y=1.0; g.add(v);
   const h=new THREE.Mesh(new THREE.BoxGeometry(1.2,0.25,0.25),m); h.position.y=1.5; g.add(h);
   g.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
@@ -2246,12 +2306,12 @@ function makeShellMesh(type){
   if(type==='bomb'){                       // aerial bomb: fat body, nose cone, tail fins
     const g=new THREE.Group();
     const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.42,1.0,4,10),
-      new THREE.MeshStandardMaterial({color:0x3f4238,roughness:0.55,metalness:0.45}));
+      toonMat({color:0x3f4238,roughness:0.55,metalness:0.45}));
     g.add(body);
     const nose=new THREE.Mesh(new THREE.ConeGeometry(0.42,0.6,10),
-      new THREE.MeshStandardMaterial({color:0x8a2f1f,roughness:0.6}));
+      toonMat({color:0x8a2f1f,roughness:0.6}));
     nose.position.y=1.0; g.add(nose);
-    const finMat=new THREE.MeshStandardMaterial({color:0x2e3129,roughness:0.7,metalness:0.3,side:THREE.DoubleSide});
+    const finMat=toonMat({color:0x2e3129,roughness:0.7,metalness:0.3,side:THREE.DoubleSide});
     for(let i=0;i<4;i++){
       const fin=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.5,0.45),finMat);
       fin.position.y=-0.85; fin.rotation.y=i*Math.PI/2;
@@ -2263,15 +2323,15 @@ function makeShellMesh(type){
   if(type==='bazooka'||type==='shell'){
     const g=new THREE.Group();
     const sc=type==='shell'?1.9:1;    // artillery shells are noticeably heavier
-    const b=new THREE.Mesh(new THREE.CylinderGeometry(0.22*sc,0.22*sc,1.1*sc,10),new THREE.MeshStandardMaterial({color:type==='shell'?0x6b6250:0x4a4636,roughness:0.6,metalness:type==='shell'?0.5:0}));
+    const b=new THREE.Mesh(new THREE.CylinderGeometry(0.22*sc,0.22*sc,1.1*sc,10),toonMat({color:type==='shell'?0x6b6250:0x4a4636,roughness:0.6,metalness:type==='shell'?0.5:0}));
     g.add(b);
-    const n=new THREE.Mesh(new THREE.ConeGeometry(0.22*sc,0.45*sc,10),new THREE.MeshStandardMaterial({color:0x8a2f1f,roughness:0.6}));
+    const n=new THREE.Mesh(new THREE.ConeGeometry(0.22*sc,0.45*sc,10),toonMat({color:0x8a2f1f,roughness:0.6}));
     n.position.y=0.77*sc; g.add(n);
     return g;
   }
   const colr=type==='cluster'?0x5c5822:type==='mine'?0x333126:type==='bomblet'?0x31302a:0x3d4a2a;
   return new THREE.Mesh(new THREE.SphereGeometry(type==='bomblet'?0.22:0.34,10,8),
-    new THREE.MeshStandardMaterial({color:colr,roughness:0.7}));
+    toonMat({color:colr,roughness:0.7}));
 }
 function spawnProj(type,pos,vel,opts){
   const mesh=makeShellMesh(type);
@@ -2345,7 +2405,7 @@ function spawn3DExplosion(x,y,z,radius,sceneRef=scene){
 function spawnParticles(pos,n,color,speed){
   for(let i=0;i<n;i++){
     const m=new THREE.Mesh(new THREE.TetrahedronGeometry(0.22+Math.random()*0.3),
-      new THREE.MeshStandardMaterial({color,roughness:0.9,transparent:true}));
+      toonMat({color,roughness:0.9,transparent:true}));
     m.position.copy(pos);
     scene.add(m);
     B.parts.push({mesh:m,vel:new THREE.Vector3((Math.random()-0.5)*speed*2,Math.random()*speed,(Math.random()-0.5)*speed*2),life:0.9+Math.random()*0.8});
@@ -2595,7 +2655,7 @@ function fire(h,w,dir,speed){
         t.distanceTo(a.position)-t.distanceTo(b.position))[0];
       ry=f?-Math.atan2(f.position.z-t.z,f.position.x-t.x):0;
     } else { const az=camAzimuth(); ry=-Math.atan2(az.z,az.x); }
-    const steel=new THREE.MeshStandardMaterial({color:0x6b6f63,roughness:0.6,metalness:0.5,flatShading:true});
+    const steel=toonMat({color:0x6b6f63,roughness:0.6,metalness:0.5,flatShading:true});
     for(let r=0;r<3;r++)
       for(let k=0;k<3;k++)
         bBlock(bd,t.x+Math.cos(ry+Math.PI/2)*(k-1)*1.7,y0+0.85+r*1.6,
@@ -2728,8 +2788,8 @@ function rayGround(from,dir){
 }
 function makeFieldGun(){
   const g=new THREE.Group();
-  const steel=new THREE.MeshStandardMaterial({color:0x53584a,roughness:0.55,metalness:0.6});
-  const dark =new THREE.MeshStandardMaterial({color:0x393d34,roughness:0.7,metalness:0.4});
+  const steel=toonMat({color:0x53584a,roughness:0.55,metalness:0.6});
+  const dark =toonMat({color:0x393d34,roughness:0.7,metalness:0.4});
   const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.26,0.32,4.2,12),steel);
   barrel.rotation.z=-Math.PI/2+0.42; barrel.position.set(1.5,1.85,0); g.add(barrel);
   const brake=new THREE.Mesh(new THREE.CylinderGeometry(0.36,0.36,0.5,12),dark);
@@ -2749,8 +2809,8 @@ function makeFieldGun(){
 }
 function makePlaneMesh(){
   const g=new THREE.Group();
-  const mat=new THREE.MeshStandardMaterial({color:0x2e3238,roughness:0.42,metalness:0.55,flatShading:true});
-  const dark=new THREE.MeshStandardMaterial({color:0x1e2126,roughness:0.5,metalness:0.5,flatShading:true});
+  const mat=toonMat({color:0x2e3238,roughness:0.42,metalness:0.55,flatShading:true});
+  const dark=toonMat({color:0x1e2126,roughness:0.5,metalness:0.5,flatShading:true});
   // blended flying wing: a wide swept delta with a low centre body
   const wing=new THREE.Mesh(new THREE.ConeGeometry(7.2,9.5,3),mat);
   wing.rotation.x=Math.PI/2; wing.rotation.z=-Math.PI/2;
