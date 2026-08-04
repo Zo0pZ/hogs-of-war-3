@@ -271,6 +271,7 @@
 </div>
 
 <div id="toolbar">
+  <button id="pausebtn">Menu [Esc]</button>
   <button id="helpbtn">Manual [H]</button>
   <button id="voicebtn">Voice: ON</button>
   <button id="sfxbtn">Sound: ON</button>
@@ -419,6 +420,19 @@
         <button class="stamp" id="btnNext">Next Region</button>
         <button class="stamp alt hidden" id="btnArmEnd">Armoury</button>
         <button class="stamp ghost" id="btnHome">Back to HQ</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pausemenu" class="overlay hidden">
+    <div class="poster" style="max-width:380px; text-align:center">
+      <h2 class="stencil">Stand Easy</h2>
+      <div class="rule"></div>
+      <p class="small" id="pauseNote"></p>
+      <div class="btnrow" style="flex-direction:column; gap:7px; align-items:stretch">
+        <button class="stamp" id="btnResume">Resume</button>
+        <button class="stamp alt" id="btnPauseManual">Field Manual</button>
+        <button class="stamp ghost" id="btnQuitBattle">Quit to HQ</button>
       </div>
     </div>
   </div>

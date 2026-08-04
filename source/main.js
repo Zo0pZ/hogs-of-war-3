@@ -3418,6 +3418,15 @@ addEventListener('keydown',e=>{
     if(k!=='escape'){ binds[listeningFor]=k; saveBinds(); }
     listeningFor=null; buildBindList(); return;
   }
+  if(k==='escape'){
+    // close whatever is open, innermost first, before offering the menu
+    for(const id of ['help','record','netalert','joinbox','armoury']){
+      const el=$(id);
+      if(el&&!el.classList.contains('hidden')){ el.classList.add('hidden'); e.preventDefault(); return; }
+    }
+    if(screenState==='battle'){ togglePause(); e.preventDefault(); }
+    return;
+  }
   if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault();
   keys[k]=true;
   if(k===binds.fire&&!e.repeat) startCharge();
@@ -3863,8 +3872,39 @@ function updateAimDot(){
 
 /* ================= UPDATE LOOP ================= */
 const clock=new THREE.Clock();
+let halted=false;
+/* Online, one player pausing must not stop everybody else, so there the menu
+   opens over a game that keeps running. */
+function pauseStopsTheWorld(){ return !netOn(); }
+function openPause(){
+  if(screenState!=='battle'||!B||B.over) return;
+  halted=pauseStopsTheWorld();
+  const note=$('pauseNote');
+  if(note) note.textContent=halted
+    ? 'The battle is frozen. Nobody loses their turn.'
+    : 'The other players are still going — this only opens your menu.';
+  $('pausemenu').classList.remove('hidden');
+}
+function closePause(){
+  halted=false;
+  $('pausemenu').classList.add('hidden');
+}
+function togglePause(){
+  if($('pausemenu').classList.contains('hidden')) openPause(); else closePause();
+}
+function quitBattle(){
+  closePause();
+  try{ netLeave(); }catch(e){}
+  $('endscreen').classList.add('hidden');
+  disposeBattle();
+  $('hud').classList.add('hidden'); $('tray').classList.add('hidden');
+  showOnly('menu'); refreshContinue(); refreshRecordBtn();
+}
 function update(){
-  const dt=Math.min(clock.getDelta(),1/25);
+  let dt=Math.min(clock.getDelta(),1/25);
+  // Paused means time stops. Everything moves by dt, so zeroing it freezes the
+  // battle outright while rendering — and the camera — carry on.
+  if(halted) dt=0;
   pollGamepad(dt);
   for(const c of clouds.children){ c.position.x+=c.userData.s*dt*(B?1+B.wind*0.15:1); if(c.position.x>340) c.position.x=-340; }
   water.position.y=waterLevel+Math.sin(performance.now()*0.0012)*0.07;
@@ -4589,6 +4629,10 @@ $('btnRecord').onclick=()=>{
 $('btnCloseRecord').onclick=()=>$('record').classList.add('hidden');
 $('btnCloseHelp').onclick=()=>$('help').classList.add('hidden');
 $('helpbtn').onclick=()=>$('help').classList.toggle('hidden');
+$('pausebtn').onclick=()=>{ if(screenState==='battle') togglePause(); else showOnly('menu'); };
+$('btnResume').onclick=closePause;
+$('btnPauseManual').onclick=()=>$('help').classList.remove('hidden');
+$('btnQuitBattle').onclick=quitBattle;
 $('btnBack1').onclick=()=>showOnly('menu');
 $('btnAbort').onclick=()=>showOnly('menu');
 $('btnDeploy').onclick=()=>{
@@ -5124,7 +5168,8 @@ window.HOW2={ get B(){return B;}, get screen(){return screenState;}, get campaig
   cycleTouch, get touchPref(){return touchPref;},
   strikeMarker, cycleWeapon,
   sfx, placeSound, get revBus(){return revBus;}, get AC(){return AC;},
-  camState:cam, followingShot, grabCamera, genTerrain, planAIMove, planAI, planAIBoard, aiBoard, solveArc, simShot, PHYS_DT, stepProjPhysics,
+  camState:cam, followingShot, grabCamera, genTerrain,
+  togglePause, openPause, closePause, quitBattle, get halted(){return halted;}, planAIMove, planAI, planAIBoard, aiBoard, solveArc, simShot, PHYS_DT, stepProjPhysics,
   beginRetreat, RETREAT_TIME, get ghostVisible(){return ghostPts.visible;},
   openArmoury, buildArmoury, buyHog, buyWeapon, get coins(){return coins();},
   buildTray, currentWeapon, canUse,
