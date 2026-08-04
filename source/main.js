@@ -3188,7 +3188,46 @@ addEventListener('keyup',e=>{ const k=e.key.toLowerCase(); keys[k]=false; if(k==
 
 /* ================= TOUCH ================= */
 const touch={up:false,down:false,left:false,right:false,aimUp:false,aimDown:false};
-const isTouch=matchMedia('(pointer:coarse)').matches||'ontouchstart' in window||navigator.maxTouchPoints>0;
+/* A desktop with a touchscreen is still a desktop. The old test ORed together
+   "any touch capability at all" — but 'ontouchstart' in window and
+   navigator.maxTouchPoints>0 are both true on ordinary Windows laptops, which is
+   how the on-screen pad ended up on a work PC. Ask instead about the PRIMARY
+   pointer and whether hovering is even possible: a phone has a coarse pointer
+   and cannot hover; a laptop with a trackpad reports a fine pointer even when
+   the screen also happens to be touch-sensitive. */
+function looksLikeTouchDevice(){
+  return matchMedia('(pointer:coarse)').matches && matchMedia('(hover:none)').matches;
+}
+const TOUCH_MODES=['auto','on','off'];
+let touchPref=(()=>{ try{ const v=localStorage.getItem('hogs2touch');
+  return TOUCH_MODES.includes(v)?v:'auto'; }catch(e){ return 'auto'; } })();
+let isTouch=touchPref==='on'||(touchPref==='auto'&&looksLikeTouchDevice());
+let lastTouchAt=0;
+function touchLabel(){
+  const b=$('touchbtn'); if(!b) return;
+  b.textContent='Touch: '+(touchPref==='auto'?(isTouch?'AUTO (ON)':'AUTO (OFF)'):touchPref.toUpperCase());
+}
+function cycleTouch(){
+  touchPref=TOUCH_MODES[(TOUCH_MODES.indexOf(touchPref)+1)%TOUCH_MODES.length];
+  try{ localStorage.setItem('hogs2touch',touchPref); }catch(e){}
+  applyTouchPref();
+}
+function applyTouchPref(){
+  const want=touchPref==='on'||(touchPref==='auto'&&looksLikeTouchDevice());
+  isTouch=!want;            // force setTouchMode to actually apply
+  setTouchMode(want);
+  touchLabel();
+}
+/* And if that guess is still wrong either way, the first real input corrects it,
+   so nobody is stuck with the wrong controls. */
+function setTouchMode(on){
+  if(on===isTouch) return;
+  isTouch=on;
+  const pad=$('touchpad');
+  if(pad) pad.classList.toggle('hidden',!on);
+  document.body.classList.toggle('touch',on);
+  touchLabel();
+}
 function bindTouchBtn(id,onDown,onUp){
   const el=$(id); if(!el) return;
   const start=e=>{ e.preventDefault(); el.classList.add('act'); onDown&&onDown(); };
@@ -3199,9 +3238,20 @@ function bindTouchBtn(id,onDown,onUp){
   el.addEventListener('pointerleave',end);
 }
 function initTouch(){
-  if(!isTouch) return;
-  $('touchpad').classList.remove('hidden');
-  document.body.classList.add('touch');
+  $('touchpad').classList.toggle('hidden',!isTouch);
+  document.body.classList.toggle('touch',isTouch);
+  touchLabel();
+  // a genuine finger turns the pad on; a mouse or a key turns it off. The
+  // timestamp guard is because phones fire a synthetic mousemove after a tap,
+  // which would otherwise hide the controls the moment they were used.
+  addEventListener('touchstart',()=>{ lastTouchAt=performance.now(); if(touchPref==='auto') setTouchMode(true); },{passive:true});
+  addEventListener('pointerdown',e=>{
+    if(e.pointerType==='touch'){ lastTouchAt=performance.now(); setTouchMode(true); }
+  },{passive:true});
+  addEventListener('mousemove',e=>{
+    if((e.movementX||e.movementY)&&performance.now()-lastTouchAt>900&&touchPref==='auto') setTouchMode(false);
+  },{passive:true});
+  addEventListener('keydown',()=>{ if(touchPref==='auto') setTouchMode(false); });
   bindTouchBtn('tUp',   ()=>touch.up=true,    ()=>touch.up=false);
   bindTouchBtn('tDown', ()=>touch.down=true,  ()=>touch.down=false);
   bindTouchBtn('tLeft', ()=>touch.left=true,  ()=>touch.left=false);
@@ -4244,6 +4294,7 @@ $('voicebtn').onclick=toggleVoice;
 $('sfxbtn').onclick=toggleSfx;
 $('gfxbtn').onclick=cycleGfx;
 $('fsbtn').onclick=toggleFullscreen;
+$('touchbtn').onclick=cycleTouch;
 $('btnArmBrief').onclick=()=>openArmoury('briefing');
 $('btnArmEnd').onclick=()=>openArmoury('end');
 $('btnArmClose').onclick=closeArmoury;
@@ -4272,7 +4323,9 @@ window.HOW2={ get B(){return B;}, get screen(){return screenState;}, get campaig
   impactRing, aimDot, trajPts, get buildings(){return buildings;}, get debris(){return debris;}, get props(){return props;},
   get hazards(){return hazards;}, get loose(){return loose;}, get scene(){return scene;},
   get waterLevel(){return waterLevel;}, beginTurn, showTutorial, binds, hitscan,
-  get touch(){return touch;}, get isTouch(){return isTouch;}, strikeMarker, cycleWeapon,
+  get touch(){return touch;}, get isTouch(){return isTouch;}, setTouchMode, looksLikeTouchDevice,
+  cycleTouch, get touchPref(){return touchPref;},
+  strikeMarker, cycleWeapon,
   camState:cam, genTerrain, planAIMove, planAI, planAIBoard, aiBoard, solveArc, simShot, PHYS_DT, stepProjPhysics,
   openArmoury, buildArmoury, buyHog, buyWeapon, get coins(){return coins();},
   buildTray, currentWeapon, canUse,
