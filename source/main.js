@@ -1,3 +1,4 @@
+import * as NET from './net.js';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -436,7 +437,33 @@ function animateWater(t){
 let terrainMesh=null, heights=null, baseColors=null, theme=THEMES.green;
 const VX=NX+1, VZ=NZ+1;
 function idx(i,j){ return j*VX+i; }
-function genTerrain(themeKey){
+/* ================= DETERMINISTIC RANDOMNESS =================
+   Online play needs every player's copy of the battlefield to be identical, so
+   map generation draws from a seeded stream rather than Math.random(). mulberry32
+   is tiny, fast and produces the same sequence from the same seed in every
+   browser — which is the whole point.
+
+   IMPORTANT: only gameplay-shaping randomness may use rnd(). Anything cosmetic
+   (particles, debris spin, voice lines, sound variation) must stay on
+   Math.random(), because it fires a different number of times on different
+   machines and would otherwise pull the shared stream out of step. */
+let rngState=1;
+function setSeed(seed){
+  rngState=(seed>>>0)||1;
+}
+function rnd(){
+  rngState=(rngState+0x6D2B79F5)>>>0;
+  let t=rngState;
+  t=Math.imul(t^(t>>>15),t|1);
+  t^=t+Math.imul(t^(t>>>7),t|61);
+  return ((t^(t>>>14))>>>0)/4294967296;
+}
+/* A fresh seed for a battle nobody is sharing. */
+function newSeed(){ return (Math.random()*0xFFFFFFFF)>>>0; }
+
+function genTerrain(themeKey,seed){
+  // seed first: everything below draws from the shared stream
+  setSeed(seed!==undefined?seed:newSeed());
   theme=THEMES[themeKey]||THEMES.green;
   scene.fog=new THREE.Fog(theme.fog,180,560);
   renderer.setClearColor(theme.sky);
@@ -444,11 +471,11 @@ function genTerrain(themeKey){
   setSky('#'+sc.clone().offsetHSL(0.02,0.04,0.14).getHexString(),
          '#'+sc.clone().offsetHSL(-0.01,0.02,-0.02).getHexString());
   heights=new Float32Array(VX*VZ);
-  const a1=(4+Math.random()*3)*theme.amp, a2=(7+Math.random()*5)*theme.amp, a3=2.2*theme.amp;
-  const f1=0.045+Math.random()*0.02, f2=0.016+Math.random()*0.008, f3=0.11+Math.random()*0.05;
-  const p1=Math.random()*9,p2=Math.random()*9,p3=Math.random()*9,p4=Math.random()*9;
-  const hasLagoon=Math.random()<0.65;
-  const lagX=(Math.random()-0.5)*TW*0.5, lagZ=(Math.random()-0.5)*TD*0.4, lagR=18+Math.random()*14;
+  const a1=(4+rnd()*3)*theme.amp, a2=(7+rnd()*5)*theme.amp, a3=2.2*theme.amp;
+  const f1=0.045+rnd()*0.02, f2=0.016+rnd()*0.008, f3=0.11+rnd()*0.05;
+  const p1=rnd()*9,p2=rnd()*9,p3=rnd()*9,p4=rnd()*9;
+  const hasLagoon=rnd()<0.65;
+  const lagX=(rnd()-0.5)*TW*0.5, lagZ=(rnd()-0.5)*TD*0.4, lagR=18+rnd()*14;
   for(let j=0;j<VZ;j++)for(let i=0;i<VX;i++){
     const x=-TW/2+i*(TW/NX), z=-TD/2+j*(TD/NZ);
     let h=5.5+Math.sin(x*f1+p1)*a1+Math.sin(z*f1*1.3+p2)*a1*0.7
@@ -535,7 +562,10 @@ function normalAt(x,z){
   const n=new THREE.Vector3(heightAt(x-e,z)-heightAt(x+e,z),2*e,heightAt(x,z-e)-heightAt(x,z+e));
   return n.normalize();
 }
+let craterLog=[];
 function crater(x,z,r,depth){
+  // remembered so a returning player can replay the damage onto a fresh map
+  if(craterLog) craterLog.push([x,z,r,depth]);
   const g=terrainMesh.geometry, pos=g.attributes.position, col=g.attributes.color;
   const dirtC=new THREE.Color(theme.dirt).offsetHSL(0,0,-0.06);
   const i0=Math.max(0,Math.floor((x-r+TW/2)/(TW/NX))), i1=Math.min(NX,Math.ceil((x+r+TW/2)/(TW/NX)));
@@ -588,8 +618,10 @@ function newBuilding(cx,cz){
   const bd={center:new THREE.Vector3(cx,heightAt(cx,cz)+2,cz), radius:0, blocks:[]};
   buildings.push(bd); return bd;
 }
+let blockSeq=0;
 function bBlock(bd,x,y,z,sx,sy,sz,mat,rx=0,ry=0){
   const m=new THREE.Mesh(unitBox,mat);
+  m.userData.bid=blockSeq++;         // stable id: indices shift as blocks are removed
   m.scale.set(sx,sy,sz); m.position.set(x,y,z); m.rotation.set(rx,ry,0);
   m.castShadow=true; m.receiveShadow=true; scene.add(m);
   let hx=sx/2,hy=sy/2,hz=sz/2;
@@ -765,11 +797,11 @@ function buildRuin(cx,cz){
   const bd=newBuilding(cx,cz), y0=heightAt(cx,cz);
   const n1=4,n2=3;
   for(let k=0;k<n1;k++){
-    const hgt=1.2+Math.random()*2.6;
+    const hgt=1.2+rnd()*2.6;
     bBlock(bd,cx-3+k*1.6,y0+hgt/2,cz,1.5,hgt,0.5,k%2?brickMat:brickMat2);
   }
   for(let k=0;k<n2;k++){
-    const hgt=1.0+Math.random()*2.2;
+    const hgt=1.0+rnd()*2.2;
     bBlock(bd,cx-3.55,y0+hgt/2,cz+1.0+k*1.6,0.5,hgt,1.5,k%2?brickMat2:brickMat);
   }
 }
@@ -877,7 +909,7 @@ function spawnBoat(x,z,yaw){
   mesh.position.set(x,waterLevel,z);
   mesh.rotation.y=yaw;
   scene.add(mesh);
-  const b={mesh,x,z,yaw,rider:null,bob:Math.random()*6};
+  const b={mesh,x,z,yaw,rider:null,bob:rnd()*6};
   boats.push(b);
   return b;
 }
@@ -899,7 +931,7 @@ function landNear(x,z,rad){
 function placeBoats(){
   let placed=0,tries=0;
   while(placed<6&&tries++<1200){
-    const bx=(Math.random()-0.5)*(TW-20), bz=(Math.random()-0.5)*(TD-14);
+    const bx=(rnd()-0.5)*(TW-20), bz=(rnd()-0.5)*(TD-14);
     const bh=heightAt(bx,bz);
     if(bh<waterLevel+0.7||bh>waterLevel+4) continue;      // must be a gentle beach
     if(blockAt(new THREE.Vector3(bx,bh+1.2,bz),2)) continue;
@@ -925,6 +957,7 @@ const BOARD_RANGE=8.5;
    gamepad and touch all route through here so driving works on every input. */
 function moveActive(h,dx,dz,dt){
   if(!h) return;
+  if(netOn()&&!NETG.applying&&iControl(h.team)) netSendMove(h);
   if(h.ship) driveShip(h.ship,dx,dz,dt);
   else if(h.boat) driveBoat(h.boat,dx,dz,dt);
   else if(h.tank) driveTank(h.tank,dx,dz,dt);
@@ -1068,7 +1101,7 @@ function spawnDestroyer(x,z,yaw){
   mesh.position.set(x,waterLevel,z);
   mesh.rotation.y=yaw;
   scene.add(mesh);
-  const s={mesh,x,z,yaw,bob:Math.random()*6,crew:null,y:waterLevel+4.4};
+  const s={mesh,x,z,yaw,bob:rnd()*6,crew:null,y:waterLevel+4.4};
   ships.push(s);
   return s;
 }
@@ -1076,7 +1109,7 @@ function placeDestroyer(){
   // wants deep water with sea room, ideally out towards a map edge
   let best=null;
   for(let i=0;i<600;i++){
-    const x=(Math.random()-0.5)*(TW-16), z=(Math.random()-0.5)*(TD-16);
+    const x=(rnd()-0.5)*(TW-16), z=(rnd()-0.5)*(TD-16);
     if(!isNavigable(x,z)) continue;
     let clear=true;
     for(let a=0;a<8&&clear;a++){
@@ -1088,7 +1121,7 @@ function placeDestroyer(){
     const score=-nearBoat;                     // prefer sitting near the moorings
     if(!best||score>best.score) best={x,z,score};
   }
-  if(best) spawnDestroyer(best.x,best.z,Math.random()*Math.PI*2);
+  if(best) spawnDestroyer(best.x,best.z,rnd()*Math.PI*2);
 }
 function shipAt(pos,rad){
   for(const s of ships){ if(!s.crew&&Math.hypot(s.x-pos.x,s.z-pos.z)<rad) return s; }
@@ -1218,11 +1251,11 @@ function placeTanks(){
   if(B&&B.cfg&&B.cfg.nats.length>2){
     let put=0;
     for(let i=0;i<600&&put<2;i++){
-      const x=(Math.random()-0.5)*TW*0.34, z=(Math.random()-0.5)*TD*0.34;
+      const x=(rnd()-0.5)*TW*0.34, z=(rnd()-0.5)*TD*0.34;
       if(heightAt(x,z)<WATER_Y+2.5) continue;
       if(blockAt(new THREE.Vector3(x,heightAt(x,z)+1.6,z),3)) continue;
       if(tanks.some(t=>Math.hypot(t.x-x,t.z-z)<40)) continue;
-      spawnTank(x,z,Math.random()*Math.PI*2); put++;
+      spawnTank(x,z,rnd()*Math.PI*2); put++;
     }
     if(put) return;
   }
@@ -1230,14 +1263,14 @@ function placeTanks(){
     let done=false;
     const attempt=(minX,maxX,slope)=>{
       for(let i=0;i<400;i++){
-        const x=side*(minX+Math.random()*(maxX-minX));
-        const z=(Math.random()-0.5)*(TD-40);
+        const x=side*(minX+rnd()*(maxX-minX));
+        const z=(rnd()-0.5)*(TD-40);
         const y=heightAt(x,z);
         if(y<waterLevel+2.2) continue;
         if(Math.abs(heightAt(x+4,z)-y)>slope||Math.abs(heightAt(x,z+4)-y)>slope) continue;
         if(blockAt(new THREE.Vector3(x,y+1.6,z),3.4)) continue;
         if(tanks.some(t=>Math.hypot(t.x-x,t.z-z)<30)) continue;
-        spawnTank(x,z,Math.random()*Math.PI*2);
+        spawnTank(x,z,rnd()*Math.PI*2);
         return true;
       }
       return false;
@@ -1345,7 +1378,7 @@ function buildDefenceBase(cx,cz){
   // the gun itself
   const gun=makeFieldGun();
   gun.position.set(cx+1.2,y0,cz-1.4);
-  gun.rotation.y=Math.random()*Math.PI*2;
+  gun.rotation.y=rnd()*Math.PI*2;
   scene.add(gun); loose.push(gun);
   emplacements.push({type:'arty',mesh:gun,x:cx+1.2,z:cz-1.4,y:y0,shots:2});
   // machine-gun nest
@@ -1358,7 +1391,7 @@ function buildDefenceBase(cx,cz){
   const bl=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,2.0,8),mgM);
   bl.rotation.z=-Math.PI/2; bl.position.set(1.5,1.28,0); nest.add(bl);
   nest.position.set(cx+1.0,y0,cz+3.0);
-  nest.rotation.y=Math.random()*Math.PI*2;
+  nest.rotation.y=rnd()*Math.PI*2;
   nest.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
   scene.add(nest); loose.push(nest);
   emplacements.push({type:'mg',mesh:nest,x:cx+1.0,z:cz+3.0,y:y0,shots:3});
@@ -1388,8 +1421,8 @@ function spawnAmmoCrate(x,y,z,big){
   const n=big?6:2, s=1.05;
   for(let i=0;i<n;i++){
     const tier=Math.floor(i/2);
-    box((i%2?1:-1)*s*0.82+(Math.random()-0.5)*0.2, s*0.5+tier*s*0.98,
-        (Math.random()-0.5)*0.5, s, (Math.random()-0.5)*0.5);
+    box((i%2?1:-1)*s*0.82+(rnd()-0.5)*0.2, s*0.5+tier*s*0.98,
+        (rnd()-0.5)*0.5, s, (rnd()-0.5)*0.5);
   }
   g.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } });
   g.position.set(x,y,z);
@@ -1435,9 +1468,9 @@ function placeStructures(){
   clearStructures();
   const kinds=['cottage','bunker','ruin','tower','watch','sand','cottage','ruin'];
   const sites=[]; let tries=0;
-  const count=11+Math.floor(Math.random()*4);
+  const count=11+Math.floor(rnd()*4);
   while(sites.length<count&&tries++<400){
-    const x=(Math.random()-0.5)*(TW-70), z=(Math.random()-0.5)*(TD-45);
+    const x=(rnd()-0.5)*(TW-70), z=(rnd()-0.5)*(TD-45);
     const h=heightAt(x,z);
     if(h<WATER_Y+2.2) continue;
     if(Math.abs(heightAt(x+5,z)-h)>2.4||Math.abs(heightAt(x,z+5)-h)>2.4) continue;
@@ -1448,10 +1481,10 @@ function placeStructures(){
   // 1940s houses share the same site-selection + flattening as the procedural
   // structures, so they never clip a slope or land on top of each other
   const houseStyles=['cottage','shed','block','cottage'];
-  let hTries=0, wanted=5+Math.floor(Math.random()*4);
+  let hTries=0, wanted=5+Math.floor(rnd()*4);
   const houses=[];
   while(houses.length<wanted&&hTries++<300){
-    const x=(Math.random()-0.5)*(TW-70), z=(Math.random()-0.5)*(TD-45);
+    const x=(rnd()-0.5)*(TW-70), z=(rnd()-0.5)*(TD-45);
     const h=heightAt(x,z);
     if(h<WATER_Y+2.2) continue;
     if(Math.abs(heightAt(x+6,z)-h)>2.6||Math.abs(heightAt(x,z+6)-h)>2.6) continue;
@@ -1465,7 +1498,7 @@ function placeStructures(){
   let base=null;
   const tryBase=(gap,slope,tries)=>{
     for(let i=0;i<tries;i++){
-      const x=(Math.random()-0.5)*(TW-60), z=(Math.random()-0.5)*(TD-40);
+      const x=(rnd()-0.5)*(TW-60), z=(rnd()-0.5)*(TD-40);
       const h=heightAt(x,z);
       if(h<WATER_Y+2.4) continue;
       if(Math.abs(heightAt(x+6,z)-h)>slope||Math.abs(heightAt(x,z+6)-h)>slope) continue;
@@ -1498,7 +1531,7 @@ function buildStructures(plan){
   const dropHazard=(place,minGap)=>{
     let t=0;
     while(t++<200){
-      const x=(Math.random()-0.5)*(TW-60), z=(Math.random()-0.5)*(TD-36);
+      const x=(rnd()-0.5)*(TW-60), z=(rnd()-0.5)*(TD-36);
       const y=heightAt(x,z);
       if(y<WATER_Y+1.8) continue;
       if(blockAt(new THREE.Vector3(x,y+1.4,z),1.8)) continue;
@@ -1516,24 +1549,24 @@ function scatterProps(){
     theme===THEMES.desert?0x7d9642:theme===THEMES.beach?0x6f8a3c:0x4e6b2e);
   let placed=0,tries=0;
   while(placed<32&&tries++<600){
-    const x=(Math.random()-0.5)*(TW-40), z=(Math.random()-0.5)*(TD-24);
+    const x=(rnd()-0.5)*(TW-40), z=(rnd()-0.5)*(TD-24);
     if(heightAt(x,z)<WATER_Y+1.8) continue;
     if(blockAt(new THREE.Vector3(x,heightAt(x,z)+1,z),3)) continue;
     const g=new THREE.Group(), y=heightAt(x,z);
     if(theme===THEMES.desert){
       // date palm: leaning trunk with a crown of drooping fronds, plus dry scrub
-      if(Math.random()<0.68){
-        const lean=(Math.random()-0.5)*0.22, ht=3.4+Math.random()*1.8;
+      if(rnd()<0.68){
+        const lean=(rnd()-0.5)*0.22, ht=3.4+rnd()*1.8;
         const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.3,ht,7),
           new THREE.MeshStandardMaterial({color:0x8a6b42,roughness:0.95,flatShading:true}));
         trunk.position.y=ht/2; trunk.rotation.z=lean; g.add(trunk);
         const top=new THREE.Vector3(Math.sin(lean)*-ht/2,ht,0);
-        const nf=6+Math.floor(Math.random()*3);
+        const nf=6+Math.floor(rnd()*3);
         for(let i=0;i<nf;i++){
-          const a=i/nf*Math.PI*2+Math.random()*0.3;
-          const frond=new THREE.Mesh(new THREE.ConeGeometry(0.42,2.5+Math.random()*0.7,4),folMat);
+          const a=i/nf*Math.PI*2+rnd()*0.3;
+          const frond=new THREE.Mesh(new THREE.ConeGeometry(0.42,2.5+rnd()*0.7,4),folMat);
           frond.position.copy(top);
-          frond.rotation.z=Math.PI/2-0.55-Math.random()*0.3;
+          frond.rotation.z=Math.PI/2-0.55-rnd()*0.3;
           frond.rotation.y=a;
           frond.position.x+=Math.cos(a)*1.05; frond.position.z+=Math.sin(a)*1.05;
           frond.position.y-=0.25;
@@ -1545,15 +1578,15 @@ function scatterProps(){
       } else {
         const scrubMat=new THREE.MeshStandardMaterial({color:0x9aa05e,roughness:1,flatShading:true});
         for(let i=0;i<4;i++){
-          const b=new THREE.Mesh(new THREE.SphereGeometry(0.45+Math.random()*0.4,6,4),scrubMat);
-          b.position.set((Math.random()-0.5)*1.5,0.3+Math.random()*0.35,(Math.random()-0.5)*1.5);
+          const b=new THREE.Mesh(new THREE.SphereGeometry(0.45+rnd()*0.4,6,4),scrubMat);
+          b.position.set((rnd()-0.5)*1.5,0.3+rnd()*0.35,(rnd()-0.5)*1.5);
           b.scale.y=0.55; g.add(b);
         }
       }
     } else {
       const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.34,1.7,7),woodMat);
       trunk.position.y=0.85; g.add(trunk);
-      const nf=2+Math.floor(Math.random()*2), sc=0.8+Math.random()*0.5;
+      const nf=2+Math.floor(rnd()*2), sc=0.8+rnd()*0.5;
       for(let i=0;i<nf;i++){
         const f=new THREE.Mesh(new THREE.ConeGeometry((1.6-i*0.42)*sc,1.7*sc,8),folMat);
         f.position.y=1.8+i*1.0*sc; g.add(f);
@@ -1563,13 +1596,13 @@ function scatterProps(){
     g.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
     scene.add(g); props.push({mesh:g}); placed++;
   }
-  for(let k=0;k<14;k++){    const x=(Math.random()-0.5)*(TW-40), z=(Math.random()-0.5)*(TD-24);
+  for(let k=0;k<14;k++){    const x=(rnd()-0.5)*(TW-40), z=(rnd()-0.5)*(TD-24);
     if(heightAt(x,z)<WATER_Y+1.6) continue;
     const g=new THREE.Group();
     for(let i=0;i<3;i++){
       const bar=new THREE.Mesh(new THREE.BoxGeometry(0.22,2.4,0.22),
         new THREE.MeshStandardMaterial({color:0x4c4a44,roughness:0.7,metalness:0.5,flatShading:true}));
-      bar.rotation.set(Math.random()*0.5+(i===0?0.9:0.4),i*2.1,0.6);
+      bar.rotation.set(rnd()*0.5+(i===0?0.9:0.4),i*2.1,0.6);
       g.add(bar);
     }
     g.position.set(x,heightAt(x,z)+0.8,z);
@@ -1674,7 +1707,7 @@ function bankCareer(won){
 function clearSave(){ try{ localStorage.removeItem('hogs2'); }catch(e){} }
 function makeSquad(natIdx){
   const pool=[...NATIONS[natIdx].names];
-  return CLASSES.map(c=>{ const i=Math.floor(Math.random()*pool.length);
+  return CLASSES.map(c=>{ const i=Math.floor(rnd()*pool.length);
     return {name:pool.splice(i,1)[0], cls:c.id, rank:0, maxhp:100, up:0, branch:c.officer}; });
 }
 /* Find dry, unobstructed ground for a hog. The old version gave up after 80
@@ -1694,7 +1727,7 @@ function findSpawn(team,placed){
     const spacedN=(x,z,d)=>!placed.some(p=>Math.hypot(p.position.x-x,p.position.z-z)<d);
     for(const [rad,gap] of [[38,9],[62,7],[95,5],[140,3]]){
       for(let i=0;i<500;i++){
-        const r=Math.random()*rad, th=Math.random()*Math.PI*2;
+        const r=rnd()*rad, th=rnd()*Math.PI*2;
         const x=clamp(cx+Math.cos(th)*r,-TW/2+6,TW/2-6);
         const z=clamp(cz+Math.sin(th)*r,-TD/2+6,TD/2-6);
         if(dryN(x,z)&&clearN(x,z)&&spacedN(x,z,gap)) return {x,z};
@@ -1707,17 +1740,17 @@ function findSpawn(team,placed){
   const spaced=(x,z,d)=>!placed.some(p=>p.team===team&&Math.hypot(p.position.x-x,p.position.z-z)<d);
   // 1. preferred: own half, sensible spacing
   for(let i=0;i<400;i++){
-    const x=side*(30+Math.random()*140), z=(Math.random()-0.5)*TD*0.72;
+    const x=side*(30+rnd()*140), z=(rnd()-0.5)*TD*0.72;
     if(dry(x,z)&&clear(x,z)&&spaced(x,z,9)) return {x,z};
   }
   // 2. own half, any spacing
   for(let i=0;i<400;i++){
-    const x=side*(14+Math.random()*200), z=(Math.random()-0.5)*TD*0.85;
+    const x=side*(14+rnd()*200), z=(rnd()-0.5)*TD*0.85;
     if(dry(x,z)&&clear(x,z)) return {x,z};
   }
   // 3. anywhere at all that is dry
   for(let i=0;i<600;i++){
-    const x=(Math.random()-0.5)*(TW-20), z=(Math.random()-0.5)*(TD-14);
+    const x=(rnd()-0.5)*(TW-20), z=(rnd()-0.5)*(TD-14);
     if(dry(x,z)&&clear(x,z)) return {x,z};
   }
   // 4. last resort: sweep for the highest ground on the map
@@ -1902,10 +1935,14 @@ function crosshairDir(h){
 /* ================= BATTLE ================= */
 function startBattle(cfg){
   disposeBattle();
-  genTerrain(cfg.theme);
+  // the seed IS the battlefield: same seed, same terrain, same everything
+  if(cfg.seed===undefined) cfg.seed=newSeed();
+  craterLog=[]; blockSeq=0;        // ids must be reproducible from the seed too
+  genTerrain(cfg.theme,cfg.seed);
+  craterLog=[];                      // ignore anything the generator itself dug
   B={ cfg, hogs:[], projs:[], mines:[], parts:[], graves:[], planes:[], tracers:[],
       wind:0, state:'start', st:0, timer:45,
-      team:Math.floor(Math.random()*cfg.nats.length), idx:cfg.nats.map(()=>0),
+      team:Math.floor(rnd()*cfg.nats.length), idx:cfg.nats.map(()=>0),
       charging:false, power:0, sel:1, shotHurt:false, over:false,
       turns:0, round:1, sudden:false, earned:{kills:0,dmg:0}, fires:[], napalm:false,
       stats:cfg.nats.map(()=>blankStats()), shotTeam:null, shotHitFoe:false,
@@ -1951,7 +1988,7 @@ function disposeBattle(){
   document.querySelectorAll('.bub').forEach(e=>e.remove());
   B=null;
 }
-function newWind(){ B.wind=(Math.random()*2-1)*7;
+function newWind(){ B.wind=(rnd()*2-1)*7;
   const f=$('windfill'), half=45*Math.min(1,Math.abs(B.wind)/7);
   if(B.wind>=0){ f.style.left='50%'; f.style.width=half+'px'; f.style.right='auto'; }
   else { f.style.right='50%'; f.style.width=half+'px'; f.style.left='auto'; }
@@ -2014,6 +2051,7 @@ function isAI(team){ return B.cfg.ai[team]; }
 /* Hot-seat handover. With one human it would be pointless; with two or more it
    stops the next player seeing the last one's plans while the camera swings. */
 function maybeHandover(){
+  if(netOn()) return;                     // online, everyone is at their own screen
   if(!B||B.over||(B.cfg.humans||0)<2||isAI(B.team)) return;
   if(B.prevTeam===undefined||B.prevTeam===B.team) return;
   if(isAI(B.prevTeam)) return;                    // came from a CPU turn, no secret to keep
@@ -2058,6 +2096,8 @@ function beginTurn(first){
   // you have to re-man an emplacement each turn; vehicles you stay in
   for(const g of B.hogs) if(g.emplacement) g.emplacement=null;
   maybeHandover();
+  // every other turn, quietly check that everybody still agrees on the world
+  if(netOn()&&NETG.isHost&&B.turns>0&&B.turns%2===0) NETG.link.send({t:'hashreq'});
   const h=activeHog();
   if(h){
     if(h.cls==='Medic'&&h.hp<h.maxhp) h.hp=Math.min(h.maxhp,h.hp+4);
@@ -2078,6 +2118,7 @@ function beginTurn(first){
 }
 
 /* ================= HOG PHYSICS ================= */
+let hogAcc=0;
 function hogPhysics(h,dt){
   if(h.dead) return;
   // riding anything — the vehicle drives the position. Missing h.ship here left
@@ -2441,6 +2482,13 @@ function muzzleFlash(h){
   setTimeout(()=>scene.remove(fl),90);
 }
 function fire(h,w,dir,speed){
+  /* In a networked game a shot is the unit of truth: we send it, everyone runs
+     it, and the deterministic simulation does the rest. Guard against echoing
+     back an action we are in the middle of applying. */
+  if(netOn()&&!NETG.applying){
+    if(!iControl(h.team)) return;          // not our shot to take
+    netSendAct(h,w,dir,speed);
+  }
   // emplaced guns burn their own limited rounds, not your kit
   if(w.crewOnly&&h.emplacement){
     h.emplacement.shots--;
@@ -2556,7 +2604,7 @@ function fire(h,w,dir,speed){
     const rip=()=>{
       if(!sameBattle(myB)||n>=w.shots) return;
       const d=dir.clone();
-      d.x+=(Math.random()-0.5)*w.spread; d.y+=(Math.random()-0.5)*w.spread*0.7; d.z+=(Math.random()-0.5)*w.spread;
+      d.x+=(rnd()-0.5)*w.spread; d.y+=(rnd()-0.5)*w.spread*0.7; d.z+=(rnd()-0.5)*w.spread;
       hitscan(h,d.normalize(),w.range,w.dmg,'mg',1.1);
       sfx('mg'); muzzleFlash(h);
       n++; setTimeout(rip,70);
@@ -2574,9 +2622,9 @@ function fire(h,w,dir,speed){
     const lick=()=>{
       if(!sameBattle(myB)||n>=w.ticks) return;
       const d=dir.clone();
-      d.x+=(Math.random()-0.5)*w.cone; d.y+=(Math.random()-0.5)*w.cone*0.6+0.02; d.z+=(Math.random()-0.5)*w.cone;
+      d.x+=(rnd()-0.5)*w.cone; d.y+=(rnd()-0.5)*w.cone*0.6+0.02; d.z+=(rnd()-0.5)*w.cone;
       d.normalize();
-      const reach=w.range*(0.55+Math.random()*0.45);
+      const reach=w.range*(0.55+rnd()*0.45);
       const tip=muzzle(h).addScaledVector(d,reach*0.5);
       // visible flame puff
       const f=new THREE.Mesh(new THREE.SphereGeometry(0.55+Math.random()*0.6,7,6),
@@ -2612,7 +2660,7 @@ function fire(h,w,dir,speed){
     const salvo=()=>{
       if(!sameBattle(myB)||n>=w.shells) return;
       const d=dir.clone();
-      d.x+=(Math.random()-0.5)*w.spread; d.y+=(Math.random()-0.5)*w.spread*0.55; d.z+=(Math.random()-0.5)*w.spread;
+      d.x+=(rnd()-0.5)*w.spread; d.y+=(rnd()-0.5)*w.spread*0.55; d.z+=(rnd()-0.5)*w.spread;
       d.normalize();
       // fire from the wheeled gun if there is one, otherwise from the ship's turret line
       const origin=gun?gun.position.clone().add(new THREE.Vector3(0,2.1,0)):muzzle(h);
@@ -3081,6 +3129,7 @@ function updateHUD(){
     el.querySelector('.hpbar i').style.width=(hp/mx*100)+'%';
     el.querySelector('.cnt').textContent=list.filter(h=>!h.dead).length+'/'+list.length;
     el.classList.toggle('turn',B.team===t&&!B.over);
+    if(netOn()) el.classList.toggle('mine',t===NETG.mySlot);
   }
   $('timer').textContent=Math.max(0,Math.ceil(B.timer));
   const rr=$('roundrow');
@@ -3610,7 +3659,12 @@ function update(){
     cam.target.lerp(new THREE.Vector3(0,4,0),Math.min(1,dt*2));
     updateCamera(dt); composer.render(); return; }
 
-  for(const h of B.hogs) hogPhysics(h,dt);
+  hogAcc+=dt;
+  let hogGuard=0;
+  while(hogAcc>=PHYS_DT&&hogGuard++<8){
+    hogAcc-=PHYS_DT;
+    for(const h of B.hogs) hogPhysics(h,PHYS_DT);
+  }
   updateBoats(dt); updateTanks(dt); updateShips(dt); updateFires(dt);
   // mines
   for(const m of B.mines){
@@ -3729,8 +3783,17 @@ function update(){
     case 'action': {
       if(!h||h.dead){ endAction(); break; }
       if(B.paused) break;                       // waiting on the hot-seat handover
+      if(NETG.paused) break;                    // waiting on a player to come back
       B.timer-=dt;
-      if(B.timer<=0){ banner('TIME UP!',''); endAction(); break; }
+      // only whoever's turn it is decides that time is up — otherwise clock
+      // drift between machines would end the turn at different moments
+      if(B.timer<=0&&iControl(B.team)){
+        banner('TIME UP!',''); netSendEndTurn(B.team); endAction(); break;
+      }
+      if(B.timer<=0&&!iControl(B.team)) B.timer=0;
+      // in a networked game a remote player's turn plays out from their
+      // messages; we render it but take no input for it
+      if(netOn()&&!iControl(B.team)){ break; }
       if(isAI(B.team)){
         B.st+=dt;
         // 1. decide whether to reposition, 2. walk, 3. aim, 4. fire
@@ -4250,6 +4313,41 @@ $('btnSkirmish').onclick=()=>{ pendingMode='skirmish'; $('modeRow').classList.re
   showOnly('natsel'); buildNations(); previewSquad(); buildRoster(); };
 $('btnContinue').onclick=()=>{ campaign=loadSave(); if(campaign) launchCampaignMission(); };
 $('btnHow').onclick=()=>$('help').classList.remove('hidden');
+$('btnHostGame').onclick=()=>{ pendingMode='skirmish'; startHosting(); };
+$('btnJoinGame').onclick=()=>{ $('joinbox').classList.remove('hidden'); $('joinCode').value=''; $('joinCode').focus(); };
+$('btnJoinGo').onclick=()=>{ const c=NET.normaliseCode($('joinCode').value);
+  $('joinbox').classList.add('hidden'); startJoining(c); };
+$('btnJoinCancel').onclick=()=>$('joinbox').classList.add('hidden');
+$('joinCode').addEventListener('keydown',e=>{ if(e.key==='Enter') $('btnJoinGo').click(); });
+$('btnLobbyLeave').onclick=()=>{ netLeave(); showOnly('menu'); };
+$('btnCopyCode').onclick=()=>{
+  try{ navigator.clipboard.writeText(NETG.code||''); netStatus('Room code copied','ok');
+       setTimeout(()=>netStatus(''),1800); }catch(e){}
+};
+$('btnCpuCover').onclick=()=>hostCpuCover();
+$('btnLobbyStart').onclick=()=>{
+  if(!NETG.isHost) return;
+  // anybody who never turned up plays as a CPU squad
+  NETG.players.forEach(p=>{ if(!p.connected) p.cpu=true; });
+  const seed=newSeed();
+  setSeed(seed);
+  const squads=NETG.players.map(p=>makeSquad(p.nat));
+  const D=DIFFS[difficulty];
+  const cfg={ nats:NETG.players.map(p=>p.nat),
+    ai:NETG.players.map(p=>!!p.cpu||!p.connected),
+    campaign:false, humans:NETG.players.filter(p=>p.connected&&!p.cpu).length,
+    online:true, seed,
+    theme:['beach','green','rock','snow','desert'][Math.floor(rnd()*5)],
+    squads, aiErr:0.22*D.errMul, elStep:D.elStep,
+    sniperChance:D.sniperChance, hpBonus:0 };
+  NETG.link.send({t:'start', cfg});
+  showOnly(null);
+  startBattle(cfg);
+};
+{
+  const lc=$('lobbyCount');
+  if(lc) [...lc.children].forEach(b=>{ b.onclick=()=>setPlayerSeats(+b.dataset.p); });
+}
 $('btnRecord').onclick=()=>{
   const c=loadSave();
   const box=$('recordBody');
@@ -4318,6 +4416,475 @@ function refreshContinue(){
 }
 
 /* ================= BOOT ================= */
+
+/* ================= ONLINE PLAY =================
+
+   The host's machine is the hub: guests connect to it and nobody else. That
+   gives us a single authority for the things that must be decided once — the
+   map seed, who moves first, and what the CPU squads do.
+
+   Everything else stays in step because the simulation is deterministic. We
+   send *what a player did*, not *what happened*: a position and a shot. Both
+   ends then run identical code over an identical seeded random stream and
+   arrive at the same craters, the same damage, the same everything. That keeps
+   the traffic to a few hundred bytes a turn instead of a state dump.
+
+   The one thing that is NOT deterministic is the AI, which deliberately uses
+   unsynced randomness. Only the host thinks for the CPU squads; it broadcasts
+   their moves like any other player's. */
+
+const NETG={ link:null, active:false, isHost:false, mySlot:0, code:null,
+             players:[], paused:false, pauseMsg:'', applying:false,
+             lastMoveSent:0, pendingStart:null, myToken:null };
+
+function netOn(){ return NETG.active&&NETG.link; }
+
+/* ---- keeping tabs on who is actually still there ---- */
+const PING_EVERY=2000, GONE_AFTER=7000;
+let netTimer=null;
+function startHeartbeat(){
+  stopHeartbeat();
+  netTimer=setInterval(()=>{
+    if(!netOn()) return;
+    const now=Date.now();
+    if(NETG.isHost){
+      NETG.link.send({t:'ping'});
+      // anybody who has gone quiet has gone
+      NETG.players.forEach((p,slot)=>{
+        if(!p.connected||slot===NETG.mySlot) return;
+        if(p.lastSeen&&now-p.lastSeen>GONE_AFTER){
+          p.connected=false; p.conn=null;
+          lobbyRows(); netBroadcastLobby();
+          if(B&&!B.over&&!NETG.paused) hostPause(slot);
+        }
+      });
+    } else {
+      NETG.link.send({t:'ping'});
+      // the host going quiet is fatal — there is nobody else to ask
+      if(NETG.lastHostSeen&&now-NETG.lastHostSeen>GONE_AFTER*2){
+        netStatus('Lost contact with the host.','bad');
+        NETG.paused=true;
+        showPauseCard('Lost contact with the host. Waiting for them to come back…',false);
+      }
+    }
+  },PING_EVERY);
+}
+function stopHeartbeat(){ if(netTimer){ clearInterval(netTimer); netTimer=null; } }
+/* A fingerprint of everything that has to agree. Cheap enough to run every other
+   turn: a sample of the ground, plus where everyone is and how hurt they are. */
+function stateHash(){
+  if(!B) return 0;
+  let h=2166136261>>>0;
+  const p=v=>{ const q=Math.round(v*100)|0; h^=q; h=Math.imul(h,16777619)>>>0; };
+  for(let z=-TD/2;z<=TD/2;z+=11) for(let x=-TW/2;x<=TW/2;x+=11) p(heightAt(x,z));
+  for(const g of B.hogs){ p(g.position.x); p(g.position.y); p(g.position.z); p(g.hp); p(g.dead?1:0); }
+  p(waterLevel); p(B.team); p(B.turns);
+  return h>>>0;
+}
+function alertBox(title,body){
+  const ov=$('netalert'); if(!ov){ return; }
+  $('alertTitle').textContent=title; $('alertBody').textContent=body;
+  ov.classList.remove('hidden');
+}
+/* Is this side of the battle mine to drive? */
+function iControl(team){
+  if(!netOn()) return true;                    // offline: hot-seat rules apply
+  if(isAI(team)) return NETG.isHost;           // the host thinks for the CPU
+  return team===NETG.mySlot;
+}
+function netStatus(msg,cls){
+  const el=$('netstatus'); if(!el) return;
+  if(!msg){ el.classList.add('hidden'); return; }
+  el.textContent=msg; el.className=cls||'';
+  el.classList.remove('hidden');
+}
+
+/* ---------------- lobby ---------------- */
+function lobbyRows(){
+  const box=$('lobbyList'); if(!box) return;
+  box.innerHTML='';
+  NETG.players.forEach((p,i)=>{
+    const row=document.createElement('div');
+    row.className='prow';
+    row.style.borderLeftColor=TEAM_TINT[i%TEAM_TINT.length];
+    const who=p.cpu?'CPU':(p.connected?(p.you?'You':'Player'):'…waiting');
+    row.innerHTML='<span class="pno">P'+(i+1)+'</span>'+
+      '<button class="pbtn pnat"'+(NETG.isHost?'':' disabled')+'>'+NATIONS[p.nat].team+'</button>'+
+      '<button class="pbtn pwho'+((p.connected&&!p.cpu)?' human':'')+'" disabled>'+who+'</button>';
+    if(NETG.isHost){
+      row.querySelector('.pnat').onclick=()=>{
+        const taken=NETG.players.filter((_,k)=>k!==i).map(x=>x.nat);
+        let k=p.nat;
+        for(let s=0;s<NATIONS.length;s++){ k=(k+1)%NATIONS.length; if(!taken.includes(k)) break; }
+        p.nat=k; lobbyRows(); netBroadcastLobby();
+      };
+    }
+    box.appendChild(row);
+  });
+  const w=$('lobbyWait');
+  if(w){
+    const seated=NETG.players.filter(p=>p.connected||p.cpu).length;
+    w.textContent=NETG.isHost
+      ? seated+' of '+NETG.players.length+' seats filled. Empty seats play as CPU.'
+      : 'Waiting for the host to start…';
+  }
+  const go=$('btnLobbyStart');
+  if(go) go.classList.toggle('hidden',!NETG.isHost);
+}
+function netBroadcastLobby(){
+  if(!NETG.isHost||!NETG.link) return;
+  NETG.link.send({t:'lobby', players:NETG.players.map(p=>({nat:p.nat,connected:p.connected,cpu:p.cpu}))});
+}
+function setPlayerSeats(k){
+  k=clamp(k,2,Math.min(6,NATIONS.length));
+  const taken=()=>NETG.players.map(p=>p.nat);
+  while(NETG.players.length>k) NETG.players.pop();
+  while(NETG.players.length<k){
+    const pool=NATIONS.map((_,i)=>i).filter(i=>!taken().includes(i));
+    NETG.players.push({nat:pool.length?pool[0]:0,connected:false,cpu:false,conn:null,token:null});
+  }
+  const cnt=$('lobbyCount');
+  if(cnt) [...cnt.children].forEach(b=>b.classList.toggle('sel',+b.dataset.p===NETG.players.length));
+  lobbyRows(); netBroadcastLobby();
+}
+
+async function startHosting(){
+  netStatus('Opening a room…');
+  try{
+    const link=await NET.host();
+    NETG.link=link; NETG.active=true; NETG.isHost=true; NETG.mySlot=0; NETG.code=link.code;
+    NETG.players=[];
+    setPlayerSeats(4);
+    NETG.players[0].connected=true; NETG.players[0].you=true;
+    $('roomCode').textContent=link.code;
+    lobbyRows(); netStatus('');
+    showOnly('lobby');
+
+    // Connecting claims nothing. We wait to hear who they are — see hostSeat().
+    link.on('peerjoined',id=>{});
+    link.on('peerleft',id=>{
+      const slot=NETG.players.findIndex(p=>p.conn===id);
+      if(slot<0) return;
+      NETG.players[slot].connected=false; NETG.players[slot].conn=null;
+      lobbyRows(); netBroadcastLobby();
+      if(B&&!B.over) hostPause(slot);
+    });
+    link.on('message',(msg,who)=>hostHandle(msg,who));
+    startHeartbeat();
+    link.on('neterror',err=>netStatus('Connection trouble: '+(err&&err.type||err),'bad'));
+  }catch(e){
+    netStatus(e.message,'bad');
+    showOnly('menu');
+    alertBox('Could not open a room', e.message);
+  }
+}
+
+async function startJoining(code){
+  netStatus('Looking for room '+code+'…');
+  try{
+    const link=await NET.join(code);
+    NETG.link=link; NETG.active=true; NETG.isHost=false; NETG.code=link.code;
+    link.on('message',msg=>guestHandle(msg));
+    NETG.lastHostSeen=Date.now();
+    startHeartbeat();
+    link.on('peerleft',()=>{ netStatus('Lost the host. The game cannot continue.','bad'); });
+    link.on('neterror',err=>netStatus('Connection trouble','bad'));
+    // if we have played in this room before, ask for our old seat back
+    const saved=netRemembered(link.code);
+    link.send(saved?{t:'rejoin', token:saved.token}:{t:'hello'});
+    netStatus('');
+    showOnly('lobby');
+    $('roomCode').textContent=link.code;
+    lobbyRows();
+  }catch(e){
+    netStatus(e.message,'bad');
+    showOnly('menu');
+    alertBox('Could not join', e.message);
+  }
+}
+function netRemember(code,slot,token){
+  try{ localStorage.setItem('hogs3net',JSON.stringify({code,slot,token})); }catch(e){}
+}
+function netRemembered(code){
+  try{ const v=JSON.parse(localStorage.getItem('hogs3net')||'null');
+    return (v&&v.code===code)?v:null; }catch(e){ return null; }
+}
+
+/* Put somebody in a seat and tell them about it. Used for both a first-time
+   'hello' and a 'rejoin', so the two paths cannot drift apart. */
+function hostSeat(slot,who){
+  const p=NETG.players[slot];
+  p.connected=true; p.conn=who; p.cpu=false; p.lastSeen=Date.now();
+  p.token=p.token||('tk'+Math.random().toString(36).slice(2,10));
+  if(B&&!B.over) B.cfg.ai[slot]=false;       // take the squad back off the computer
+  NETG.link.send({t:'welcome', slot, token:p.token,
+    players:NETG.players.map(x=>({nat:x.nat,connected:x.connected,cpu:x.cpu}))},who);
+  lobbyRows(); netBroadcastLobby();
+  if(B&&!B.over) hostSendSnapshot(who,slot);
+  return p;
+}
+
+/* ---------------- host: message handling ---------------- */
+function hostHandle(msg,who){
+  const slot=NETG.players.findIndex(p=>p.conn===who);
+  if(slot>=0) NETG.players[slot].lastSeen=Date.now();
+  if(msg.t==='ping') return;
+  // anything other than an introduction from an unseated connection is noise
+  if(slot<0&&msg.t!=='hello'&&msg.t!=='rejoin') return;
+  if(msg.t==='hash'){
+    /* Drift is expected occasionally — a tab left in the background falls behind
+       and cannot always catch up. Rather than argue about who is right, the host
+       simply posts the truth back and the guest adopts it. */
+    if(!B||B.over) return;
+    if(msg.turns===B.turns&&msg.h!==stateHash()){
+      NETG.desyncs=(NETG.desyncs||0)+1;
+      hostSendSnapshot(who,slot);
+    }
+    return;
+  }
+  if(msg.t==='rejoin'){
+    // a returning player reclaims their seat, even from the CPU
+    const old=NETG.players.findIndex(p=>p.token===msg.token);
+    if(old>=0){
+      const p=hostSeat(old,who);
+      if(B&&!B.over&&NETG.pausedSlot===old) hostResume();
+      banner('PLAYER RETURNED',NATIONS[p.nat].team+' is back');
+    } else {
+      // we do not know that token — treat them as a newcomer
+      const free=NETG.players.findIndex(p=>!p.connected&&!p.cpu);
+      if(free<0){ NETG.link.send({t:'full'},who); return; }
+      hostSeat(free,who);
+    }
+    return;
+  }
+  if(msg.t==='hello'){
+    const free=NETG.players.findIndex(p=>!p.connected&&!p.cpu);
+    if(free<0){ NETG.link.send({t:'full'},who); return; }
+    hostSeat(free,who);
+    return;
+  }
+  if(slot<0) return;
+  if(msg.t==='act'||msg.t==='endturn'||msg.t==='move'){
+    // only accept a move from whoever's turn it actually is
+    if(!B||B.over||msg.team!==slot||B.team!==slot) return;
+    NETG.link.sendExcept(msg,who);          // relay to the other guests
+    applyRemote(msg);
+  }
+}
+
+/* ---------------- guest: message handling ---------------- */
+function guestHandle(msg){
+  NETG.lastHostSeen=Date.now();
+  if(msg.t==='ping') return;
+  switch(msg.t){
+    case 'welcome':
+      NETG.mySlot=msg.slot; NETG.myToken=msg.token;
+      netRemember(NETG.code,msg.slot,msg.token);
+      NETG.players=msg.players.map(p=>({...p}));
+      if(NETG.players[msg.slot]) NETG.players[msg.slot].you=true;
+      lobbyRows();
+      break;
+    case 'full':
+      netStatus('That game is full.','bad');
+      alertBox('Game full','All six seats are taken.');
+      netLeave();
+      break;
+    case 'lobby':
+      NETG.players=msg.players.map((p,i)=>({...p,you:i===NETG.mySlot}));
+      lobbyRows();
+      break;
+    case 'start':
+      showOnly(null);
+      startBattle(msg.cfg);
+      break;
+    case 'snapshot':
+      applySnapshot(msg);
+      break;
+    case 'hashreq':
+      NETG.link.send({t:'hash', turns:B?B.turns:-1, h:stateHash()});
+      break;
+    case 'pause':
+      NETG.paused=true; NETG.pauseMsg=msg.msg;
+      showPauseCard(msg.msg,false);
+      break;
+    case 'resume':
+      NETG.paused=false; hidePauseCard();
+      break;
+    case 'act': case 'endturn': case 'move':
+      applyRemote(msg);
+      break;
+  }
+}
+
+/* ---------------- pause, CPU cover, resume ---------------- */
+function hostPause(slot){
+  if(!B||B.over) return;
+  NETG.paused=true;
+  const who=NATIONS[NETG.players[slot].nat].team;
+  NETG.pauseMsg=who+' has dropped out.';
+  NETG.pausedSlot=slot;
+  NETG.link.send({t:'pause', msg:NETG.pauseMsg});
+  showPauseCard(NETG.pauseMsg,true);
+}
+function hostResume(){
+  NETG.paused=false; NETG.pausedSlot=null;
+  if(NETG.link) NETG.link.send({t:'resume'});
+  hidePauseCard();
+}
+/* Hand the missing player's squad to the computer and carry on. If they come
+   back, they take it straight off the CPU again. */
+function hostCpuCover(){
+  const slot=NETG.pausedSlot;
+  if(slot==null||!B) return;
+  NETG.players[slot].cpu=true;
+  B.cfg.ai[slot]=true;
+  netBroadcastLobby();
+  hostResume();
+  banner('CPU TAKING OVER',NATIONS[NETG.players[slot].nat].team+' is now computer-controlled');
+}
+function showPauseCard(msg,hostControls){
+  const ov=$('netpause'); if(!ov) return;
+  $('pauseMsg').textContent=msg;
+  $('btnCpuCover').classList.toggle('hidden',!hostControls);
+  $('pauseHint').textContent=hostControls
+    ? 'The game is paused until they rejoin with the room code — or let the computer take their squad and carry on.'
+    : 'The game is paused until they rejoin.';
+  ov.classList.remove('hidden');
+}
+function hidePauseCard(){ const ov=$('netpause'); if(ov) ov.classList.add('hidden'); }
+
+function netLeave(){
+  stopHeartbeat();
+  if(NETG.link) NETG.link.close();
+  NETG.link=null; NETG.active=false; NETG.isHost=false; NETG.paused=false;
+  NETG.players=[]; NETG.code=null;
+  hidePauseCard(); netStatus('');
+}
+
+/* ---------------- sending what we did ---------------- */
+function netSendAct(h,w,dir,speed){
+  if(!netOn()||NETG.applying) return;
+  NETG.link.send({t:'act', team:h.team,
+    x:h.position.x, y:h.position.y, z:h.position.z,
+    wid:w.id, dx:dir.x, dy:dir.y, dz:dir.z, sp:speed||0,
+    aim:B.aiAimAt?[B.aiAimAt.x,B.aiAimAt.y,B.aiAimAt.z]:
+        (B.strikeTarget?[B.strikeTarget.x,B.strikeTarget.y,B.strikeTarget.z]:null),
+    head:B.strikeHeading, nap:!!B.napalm});
+}
+/* A light position feed so the others can watch you walk about. The shot itself
+   carries the position that counts, so a dropped update costs nothing. */
+function netSendMove(h){
+  if(!netOn()||NETG.applying) return;
+  const now=performance.now();
+  if(now-NETG.lastMoveSent<100) return;
+  NETG.lastMoveSent=now;
+  NETG.link.send({t:'move', team:h.team, x:h.position.x, y:h.position.y, z:h.position.z});
+}
+function netSendEndTurn(team){
+  if(!netOn()||NETG.applying) return;
+  NETG.link.send({t:'endturn', team});
+}
+
+/* ---------------- applying what somebody else did ---------------- */
+function applyRemote(msg){
+  if(!B||B.over) return;
+  NETG.applying=true;
+  try{
+    if(msg.t==='move'){
+      const h=activeHog();
+      if(h&&h.team===msg.team){ h.position.set(msg.x,msg.y,msg.z); h.grounded=true; }
+    } else if(msg.t==='act'){
+      const h=activeHog();
+      if(!h||h.team!==msg.team) return;
+      h.position.set(msg.x,msg.y,msg.z); h.grounded=true;
+      B.napalm=!!msg.nap;
+      B.strikeHeading=(msg.head==null?null:msg.head);
+      B.aiAimAt=msg.aim?new THREE.Vector3(msg.aim[0],msg.aim[1],msg.aim[2]):null;
+      const w=WEAPONS.find(x=>x.id===msg.wid);
+      if(w) fire(h,w,new THREE.Vector3(msg.dx,msg.dy,msg.dz),msg.sp);
+    } else if(msg.t==='endturn'){
+      if(B.state==='action'&&B.team===msg.team) endAction();
+    }
+  } finally { NETG.applying=false; }
+}
+
+/* ---------------- catching a player up ---------------- */
+function liveBlockIds(){
+  const live=[];
+  for(const bd of buildings) for(const b of (bd.blocks||[]))
+    if(b.mesh&&b.mesh.userData.bid!==undefined) live.push(b.mesh.userData.bid);
+  return live;
+}
+function packAmmo(all){
+  return all.map(a=>{ const o={}; for(const k in a) o[k]=(a[k]===Infinity?null:a[k]); return o; });
+}
+function unpackAmmo(all){
+  return all.map(a=>{ const o={}; for(const k in a) o[k]=(a[k]===null?Infinity:a[k]); return o; });
+}
+function buildSnapshot(){
+  return { t:'snapshot',
+    cfg:{...B.cfg, squads:B.cfg.squads},
+    craters:craterLog,               // replayed onto a map rebuilt from the seed
+    live:liveBlockIds(),             // everything still standing
+    water:waterLevel,
+    battle:{team:B.team, idx:B.idx.slice(), round:B.round, turns:B.turns,
+            sudden:B.sudden, wind:B.wind, ammo:packAmmo(B.ammo), stats:B.stats, rng:rngState},
+    hogs:B.hogs.map(h=>({team:h.team,x:h.position.x,y:h.position.y,z:h.position.z,
+                          hp:h.hp,dead:h.dead})),
+    gone:buildings.map(bd=>(bd.blocks||[]).length),
+    tanks:tanks.map(t=>({x:t.x,z:t.z,yaw:t.yaw,hp:t.hp,dead:t.dead})),
+    boats:boats.map(b=>({x:b.x,z:b.z,yaw:b.yaw})),
+    emps:emplacements.map(e=>({shots:e.shots})) };
+}
+function hostSendSnapshot(to,slot){
+  if(!B||B.over||!NETG.link) return;
+  NETG.link.send(buildSnapshot(),to);
+}
+/* Rebuild the battle from the seed, then overwrite everything that has since
+   changed. Regenerating from the seed is what makes this small — we only have
+   to ship the differences, not the whole world. */
+function applySnapshot(s){
+  showOnly(null);
+  startBattle({...s.cfg});             // identical battlefield, straight from the seed
+  // dig every crater that has been blown since, in the order they happened
+  if(s.craters&&s.craters.length){
+    for(const c of s.craters) crater(c[0],c[1],c[2],c[3]);
+    craterLog=s.craters.slice();       // so we can pass it on ourselves
+  }
+  // and knock out the blocks that are no longer standing
+  if(s.live){
+    const alive=new Set(s.live);
+    for(const bd of buildings){
+      if(!bd.blocks) continue;
+      for(let i=bd.blocks.length-1;i>=0;i--){
+        const b=bd.blocks[i];
+        const id=b.mesh&&b.mesh.userData.bid;
+        if(id!==undefined&&!alive.has(id)){
+          if(b.mesh) scene.remove(b.mesh);
+          bd.blocks.splice(i,1);
+        }
+      }
+    }
+  }
+  waterLevel=s.water;
+  B.team=s.battle.team; B.idx=s.battle.idx.slice(); B.round=s.battle.round;
+  B.turns=s.battle.turns; B.sudden=s.battle.sudden; B.wind=s.battle.wind;
+  B.ammo=unpackAmmo(s.battle.ammo); B.stats=s.battle.stats;
+  setSeed(s.battle.rng);
+  s.hogs.forEach((hs,i)=>{
+    const h=B.hogs[i]; if(!h) return;
+    h.position.set(hs.x,hs.y,hs.z); h.hp=hs.hp;
+    if(hs.dead&&!h.dead){ h.dead=true; scene.remove(h.mesh); h.tag.style.display='none'; }
+  });
+  s.tanks.forEach((ts,i)=>{ const t=tanks[i]; if(!t) return;
+    t.x=ts.x; t.z=ts.z; t.yaw=ts.yaw; t.hp=ts.hp;
+    if(ts.dead&&!t.dead){ t.dead=true; scene.remove(t.mesh); } });
+  s.boats.forEach((bs,i)=>{ const b=boats[i]; if(!b) return; b.x=bs.x; b.z=bs.z; b.yaw=bs.yaw; });
+  s.emps.forEach((es,i)=>{ if(emplacements[i]) emplacements[i].shots=es.shots; });
+  buildTeamBoxes(); buildTray(); updateHUD();
+  banner('BACK IN','Caught up with the battle');
+}
+
 window.HOW2={ get B(){return B;}, get screen(){return screenState;}, get campaign(){return campaign;},
   hog:()=>activeHog(), boom, endAction, fire, WEAPONS, heightAt, aimDir,
   impactRing, aimDot, trajPts, get buildings(){return buildings;}, get debris(){return debris;}, get props(){return props;},
@@ -4334,6 +4901,11 @@ window.HOW2={ get B(){return B;}, get screen(){return screenState;}, get campaig
   boardShip, leaveShip, shipAt, driveShip, shipFits, toggleNapalm, get fires(){return B&&B.fires;},
   boardTank, leaveTank, driveTank, tankAt, emplacementAt, damageTank,
   findSpawn, walkHog, BOARD_RANGE, surfaceY, hogPhysics, blockAt, floodTank, drown,
+  setSeed, rnd, newSeed, get rngState(){return rngState;}, NET,
+  NETG, startHosting, startJoining, netLeave, iControl, applyRemote, buildSnapshot, stateHash, hostSeat,
+  get craterLog(){return craterLog;}, liveBlockIds,
+  startHeartbeat, stopHeartbeat,
+  applySnapshot, hostCpuCover, setPlayerSeats, netSendAct, netSendEndTurn,
   blankStats, mergeStats, battleStatsHTML, careerStatsHTML, bankCareer, ST,
   setWater:(y)=>{ waterLevel=y; }, WATER_Y,
   nTeams, foesOf, livingTeams, setPlayerCount, skirmishCfg, get roster(){return roster;},

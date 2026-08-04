@@ -8,7 +8,15 @@ Nothing to install. It runs in any modern browser and works with keyboard & mous
 
 ---
 
-## Playing with the family
+## Playing online
+
+One player picks **Play Online — Host** and reads out the five-character room code. Everybody else picks **Play Online — Join** and types it in. Up to six squads, each on their own machine, anywhere. Any seat nobody takes is played by the computer.
+
+Your browsers talk **directly to each other** — there is no server in the middle.
+
+If somebody drops out the game **pauses and waits** for them, so nobody loses a turn to broken wifi. The host can also hand that squad to the computer and carry on; the missing player can rejoin with the same code at any point and **take their squad straight back off the CPU**, caught up on everything they missed.
+
+## Playing round one screen
 
 On the **Enlist Your Nation** screen, choose how many squads take the field — **2 to 6** — and set each one to **Human** or **CPU**. Everyone plays on the same machine, taking it in turn.
 
