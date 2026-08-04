@@ -1,6 +1,6 @@
 # Hogs of War 3: Modern Warfare
 
-A fan-made 3D turn-based tactical pig-warfare game. Drones, stealth bombers, HIMARS, modern armour and carrier groups — up to six squads, all on one machine.
+A fan-made 3D turn-based tactical pig-warfare game. Drones, stealth bombers, HIMARS, modern armour and carrier groups — up to six squads, online or round one screen.
 
 **▶ [Play it here](https://zo0pz.github.io/hogs-of-war-3/)**
 
@@ -18,7 +18,7 @@ If somebody drops out the game **pauses and waits** for them, so nobody loses a 
 
 ## Playing round one screen
 
-On the **Enlist Your Nation** screen, choose how many squads take the field — **2 to 6** — and set each one to **Human** or **CPU**. Everyone plays on the same machine, taking it in turn.
+On the **Select Your Force** screen, choose how many squads take the field — **2 to 6** — and set each one to **Human** or **CPU**. Everyone plays on the same machine, taking it in turn.
 
 When control passes from one person to another, a **Pass the Controls** card names whose go it is and holds the clock until they're ready, so nobody watches the previous player line up their shot.
 
