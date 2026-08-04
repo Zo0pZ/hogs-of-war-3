@@ -135,13 +135,13 @@ const REGIONS=[
  {island:'Op. Final Cut', name:'Objective Swine', theme:'dark', brief:"This is it. Their last command node and the end of the war. Everything you have learned, all at once. Do not waste the ammunition."},
 ];
 const THEMES={
- beach:{grass:0x9aa04c,dirt:0x8a6f47,sand:0xc2a878,fog:0xd8c49a,sky:0xcfc093,amp:1.0},
- green:{grass:0x6f8a3c,dirt:0x6b4f33,sand:0xa89465,fog:0xcfc49a,sky:0xc4bd8e,amp:1.2},
- rock:{grass:0x8a7f57,dirt:0x6e5a44,sand:0x93815f,fog:0xc9b490,sky:0xbfae86,amp:1.9},
- snow:{grass:0xdfe3e0,dirt:0x9aa0a8,sand:0xc8ccc9,fog:0xdde2de,sky:0xd3d9d6,amp:1.4},
- dark:{grass:0x5c6136,dirt:0x4a3a2a,sand:0x77694c,fog:0xb09c76,sky:0xa39272,amp:1.6},
+ beach:{grass:0x9aa04c,dirt:0xa5885e,sand:0xc2a878,fog:0xd8c49a,sky:0xcfc093,amp:1.0},
+ green:{grass:0x6f8a3c,dirt:0x8f6f4a,sand:0xa89465,fog:0xcfc49a,sky:0xc4bd8e,amp:1.2},
+ rock:{grass:0x8a7f57,dirt:0x947d60,sand:0x93815f,fog:0xc9b490,sky:0xbfae86,amp:1.9},
+ snow:{grass:0xdfe3e0,dirt:0xb9bfc5,sand:0xc8ccc9,fog:0xdde2de,sky:0xd3d9d6,amp:1.4},
+ dark:{grass:0x5c6136,dirt:0x6e5a42,sand:0x77694c,fog:0xb09c76,sky:0xa39272,amp:1.6},
  // El Hamein Sands: bleached dunes, rocky outcrops, heat-haze sky
- desert:{grass:0xcfb277,dirt:0xa8834e,sand:0xe0cc99,fog:0xe6d3a4,sky:0xdcc894,amp:1.3},
+ desert:{grass:0xcfb277,dirt:0xc19a68,sand:0xe0cc99,fog:0xe6d3a4,sky:0xdcc894,amp:1.3},
 };
 const Q={
  turn:["Moving to contact.","Eyes on, weapons free.","This is Overwatch, you're clear.","Copy that, engaging.","Stack up, we're going in.","Say again, last transmission?"],
@@ -498,11 +498,16 @@ function genTerrain(themeKey,seed){
   placeDestroyer();
   buildAssetTags();
 }
+const _tcG=new THREE.Color(), _tcD=new THREE.Color();
 function terrainColor(h,steep){
   const c=new THREE.Color();
   if(h<WATER_Y+0.9) c.setHex(theme.sand);
-  else if(steep>0.55) c.setHex(theme.dirt);
-  else c.setHex(theme.grass);
+  else {
+    _tcG.setHex(theme.grass); _tcD.setHex(theme.dirt);
+    // only genuinely steep faces go fully to dirt, and they get there gradually
+    const t=clamp((steep-0.66)/0.34,0,1);
+    c.copy(_tcG).lerp(_tcD,t*t);        // eased, so gentle slopes stay green
+  }
   c.offsetHSL(0,(Math.random()-0.5)*0.03,(Math.random()-0.5)*0.045);
   return c;
 }
