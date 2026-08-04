@@ -2,7 +2,11 @@
 
 A fan-made 3D turn-based tactical pig-warfare game. Drones, stealth bombers, HIMARS, modern armour and carrier groups — up to six squads, online or round one screen.
 
-**▶ [Play it here](https://zo0pz.github.io/hogs-of-war-3/)**
+**▶ [Play Hogs of War 3 — Modern Warfare](https://zo0pz.github.io/hogs-of-war-3/)** — drones, stealth bombers, HIMARS, carrier groups. Playable online.
+
+**▶ [Play Hogs of War 2 — A Pig Too Far](https://zo0pz.github.io/hogs-of-war-3/how2/)** — the WW2 one: bazookas, landing craft, destroyers, a 25-region campaign. Same machine only.
+
+Both are single self-contained pages and share the same engine, so every fix lands in both. Only HoW3 has online play.
 
 Nothing to install. It runs in any modern browser and works with keyboard & mouse, a gamepad, or touch.
 
